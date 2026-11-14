@@ -3060,6 +3060,101 @@ function updatePlayer(dt) {
 
 // ---------------- networking ----------------
 let ws = null;
+// Nemesis AI view (?spectate=1): an invisible observer rides along in the bot's eyes and sees
+// where each aim model thinks the target will be. Gray = naive, yellow = lead, green = learned.
+const AIPOV = window.__aipov = { on: new URLSearchParams(location.search).get('spectate') === '1', data: null, at: 0, markers: null, cam: null, look: null };
+const AIPOV_COLORS = { naive: 0xaaaaaa, lead: 0xf0c83c, learned: 0x50dc78 };
+function aiPovSetup() {
+  if (AIPOV.markers) return;
+  document.body.classList.add('aipov');
+  AIPOV.markers = {};
+  for (const k of ['naive', 'lead', 'learned']) {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color: AIPOV_COLORS[k], transparent: true, opacity: 0.35, depthTest: false });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(PLAYER_RADIUS, 0.9, 4, 10), mat);
+    body.position.y = 0.9; body.renderOrder = 999;
+    const ringMat = new THREE.MeshBasicMaterial({ color: AIPOV_COLORS[k], transparent: true, opacity: 0.9, depthTest: false, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.62, 32), ringMat);
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; ring.renderOrder = 999;
+    g.add(body, ring);
+    g.traverse((o) => { o.raycast = () => {}; });
+    scene.add(g);
+    AIPOV.markers[k] = g;
+  }
+  const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  AIPOV.line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xff5544, transparent: true, opacity: 0.8, depthTest: false }));
+  AIPOV.line.renderOrder = 999; AIPOV.line.raycast = () => {};
+  scene.add(AIPOV.line);
+  const shotMat = new THREE.MeshBasicMaterial({ color: 0xff3322, transparent: true, opacity: 0.9, depthTest: false });
+  AIPOV.shot = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), shotMat);
+  AIPOV.shot.renderOrder = 1000; AIPOV.shot.raycast = () => {};
+  scene.add(AIPOV.shot);
+}
+function aiPovUpdate(dt) {
+  const d = AIPOV.data;
+  if (!AIPOV.on || !d) return;
+  aiPovSetup();
+  const bot = remotes.get(d.botId);
+  const tgt = d.targetId ? remotes.get(d.targetId) : null;
+  for (const r of remotes.values()) r.group.visible = !r.dead;
+  if (bot) bot.group.traverse((o) => { if (o.isSprite) o.visible = false; });   // its own name tag would block the view
+  // Over the bot's shoulder: 3 m behind and 1.5 m above its eyes, looking at its target, so the
+  // bot, the target, and the prediction ghosts are all in frame and low cover does not fill the view.
+  const botPos = bot ? bot.group.position.clone() : new THREE.Vector3().fromArray(d.botPos);
+  const tgtPos = tgt ? tgt.group.position.clone() : botPos.clone().add(new THREE.Vector3(0, 0, -5));
+  const fwd = tgtPos.clone().sub(botPos).setY(0);
+  if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+  fwd.normalize();
+  let eye = botPos.clone().addScaledVector(fwd, -3).add(new THREE.Vector3(0.8 * fwd.z, 3.1, -0.8 * fwd.x));
+  // camera collision: pull the camera in toward the bot's head if a wall is between them
+  const head = botPos.clone().add(new THREE.Vector3(0, 1.7, 0));
+  const back = eye.clone().sub(head), backLen = back.length();
+  raycaster.set(head, back.normalize());
+  raycaster.far = backLen;
+  const hitWall = raycaster.intersectObjects(obstacles.map((ob) => ob.mesh), false)[0];
+  if (hitWall) eye = head.clone().addScaledVector(back, Math.max(0.2, hitWall.distance - 0.35));
+  const lookAt = tgtPos.clone().add(new THREE.Vector3(0, 1.0, 0));
+  const k = 1 - Math.exp(-dt * 10);
+  AIPOV.cam = AIPOV.cam ? AIPOV.cam.lerp(eye, k) : eye;
+  AIPOV.look = AIPOV.look ? AIPOV.look.lerp(lookAt, 1 - Math.exp(-dt * 6)) : lookAt;
+  camera.position.copy(AIPOV.cam);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(AIPOV.look);
+  gunGroup.visible = false;
+  const y = tgt ? tgt.group.position.y : 0;
+  for (const m of ['naive', 'lead', 'learned']) {
+    const g = AIPOV.markers[m];
+    const p = d.predictions && d.predictions[m];
+    g.visible = !!p && !!tgt && !tgt.dead;
+    if (!p) continue;
+    g.position.lerp(new THREE.Vector3(p[0], y, p[1]), g.userData.placed ? 1 - Math.exp(-dt * 12) : 1);
+    g.userData.placed = true;
+    const active = m === d.mode;
+    g.children[0].material.opacity = active ? 0.5 : 0.18;
+    g.children[1].material.opacity = active ? 1 : 0.45;
+  }
+  const act = AIPOV.markers[d.mode];
+  AIPOV.line.visible = !!(act && act.visible);
+  if (AIPOV.line.visible) {
+    const a = botPos.clone().add(new THREE.Vector3(0, 1.6, 0));
+    AIPOV.line.geometry.setFromPoints([a, act.position.clone().add(new THREE.Vector3(0, 1.1, 0))]);
+  }
+  AIPOV.shot.visible = !!d.lastShot;
+  if (d.lastShot) AIPOV.shot.position.set(d.lastShot.aim[0], y + 1.2, d.lastShot.aim[1]);
+
+  const el = document.getElementById('aiPovHud');
+  if (!el) return;
+  const er = d.err || {}, st = d.stats || {};
+  const rate = (m) => { const x = st[m] || { shots: 0, hits: 0 }; return x.shots ? `${Math.round(100 * x.hits / x.shots)}% (${x.hits}/${x.shots})` : '--'; };
+  const name = bot ? bot.name : 'BOT';
+  const line = (m, label, col) => `<div style="color:${col}">${m === d.mode ? '&#9654;' : '&nbsp;&nbsp;'} ${label.padEnd(8, ' ').replace(/ /g, '&nbsp;')} error ${(er[m] || 0).toFixed(2)} m &nbsp; hits ${rate(m)}</div>`;
+  el.innerHTML = `<div style="font-size:18px;letter-spacing:3px;color:#ff6655">AI VIEW &middot; ${name}</div>`
+    + `<div>target <b>${d.targetName || '--'}</b> &middot; aim mode <b>${String(d.mode).toUpperCase()}</b> &middot; predicting ${d.horizon}s ahead &middot; ${d.los ? '<span style="color:#7f7">line of sight</span>' : '<span style="color:#f88">no line of sight</span>'}</div>`
+    + `<div style="color:#9ab">${d.warm ? 'model trained' : 'model warming up'} &middot; ${d.updates || 0} updates &middot; learned is using its ${({ model: 'movement forecast', rhythm: 'strafe-rhythm forecast', lead: 'straight-line lead' })[d.choice] || 'straight-line lead'}</div><div style="height:6px"></div>`
+    + line('naive', 'NAIVE', '#bbb') + line('lead', 'LEAD', '#f0c83c') + line('learned', 'LEARNED', '#50dc78')
+    + `<div style="height:6px"></div><div style="color:#9ab;font-size:11px">ghosts = where each model expects ${d.targetName || 'the target'} in ${d.horizon}s &middot; red dot = last shot</div>`;
+}
+
 // Nemesis panel: how well each aim model predicts where you will be (server-side, per player)
 let nemesisHudHidden = false;
 function renderNemesisHud(m) {
@@ -3073,7 +3168,7 @@ function renderNemesisHud(m) {
     return `${k === m.mode ? '>' : ' '} ${label.padEnd(8)} err ${(m.err[k] || 0).toFixed(2)}m ${bar.padEnd(20)} hit ${rate} (${st.shots})`;
   };
   el.textContent = `NEMESIS BOT AIM  [N] mode  [Shift+N] reset  [H] hide\n`
-    + `predicting where you'll be in ${m.horizon}s  ${m.warm ? 'model trained' : 'model warming up'} (${m.updates} updates)\n`
+    + `predicting where you'll be in ${m.horizon}s  ${m.warm ? 'model trained' : 'model warming up'} (${m.updates} updates, using ${m.choice || 'lead'})\n`
     + [row('naive', 'Naive'), row('lead', 'Lead'), row('learned', 'Learned')].join('\n');
 }
 function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
@@ -3081,7 +3176,7 @@ function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg))
 function connect(action, name, code) {
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${wsProto}://${location.host}`);
-  ws.onopen = () => send(action === 'create' ? { t: 'create', name } : { t: 'join', name, code });
+  ws.onopen = () => send(action === 'create' ? { t: 'create', name } : { t: 'join', name, code, spectate: AIPOV.on });
   ws.onclose = (ev) => {
     if (ev.target.intentional) return;
     document.getElementById('ping').textContent = 'DISCONNECTED — refresh to rejoin';
@@ -3176,6 +3271,7 @@ function connect(action, name, code) {
         break;
       }
       case 'nemesis': renderNemesisHud(msg); break;
+      case 'nemesispov': AIPOV.data = msg; AIPOV.at = performance.now(); break;
       case 'nemesismode': showSensToast(`BOT AIM: ${String(msg.mode).toUpperCase()}`); break;
       case 'shot': {
         const o = new THREE.Vector3().fromArray(msg.origin);
@@ -4124,6 +4220,7 @@ function animate() {
     nadeShake *= Math.exp(-dt * 7);
   } else nadeShake = 0;
 
+  aiPovUpdate(dt);
   // Render with composer (bloom+SSAO) or raw renderer based on quality tier
   if (composerEnabled) {
     composer.render();

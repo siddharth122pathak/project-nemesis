@@ -340,7 +340,7 @@ const nfsApi = { broadcastRoom, lobbyState, backToLobby };
 function sendGameInit(room, id) {
   const p = room.players.get(id);
   const others = {};
-  for (const [oid, op] of room.players) if (oid !== id && op.inGame) others[oid] = publicPlayer(oid, op);
+  for (const [oid, op] of room.players) if (oid !== id && op.inGame && !op.spectator) others[oid] = publicPlayer(oid, op);
   p.ws.send(JSON.stringify({
     t: 'init', id, color: p.color, spawn: p.pos, map: room.map, mode: room.mode || 'dm',
     w: p.w, ladder: p.ladder || 0, ladderLen: GUNGAME_LADDER.length,
@@ -469,6 +469,7 @@ wss.on('connection', (ws) => {
           color: PLAYER_COLORS[target.players.size % PLAYER_COLORS.length],
           pos: pickSpawn(target), ry: 0, pitch: 0,
           hp: MAX_HP, kills: 0, deaths: 0, dead: false, inGame: false, w: 1,
+          spectator: !!msg.spectate,   // Nemesis AI view: invisible, untargetable observer
         });
         ws.room = target;
         const pl = target.players.get(id);
@@ -478,6 +479,7 @@ wss.on('connection', (ws) => {
           // drop into the running match
           pl.inGame = true;
           sendGameInit(target, id);
+          if (pl.spectator) break;   // nobody else needs to know an observer joined
           broadcastRoom(target, { t: 'joined', player: publicPlayer(id, pl) }, id);
           broadcastRoom(target, { t: 'scores', scores: roomScores(target) });
         } else {
@@ -562,7 +564,7 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'state': {
-        if (!p || !room.started || p.dead) return;
+        if (!p || !room.started || p.dead || p.spectator) return;
         if (Array.isArray(msg.pos) && msg.pos.length === 3) p.pos = msg.pos.map(Number);
         p.ry = Number(msg.ry) || 0;
         p.pitch = Number(msg.pitch) || 0;
@@ -744,6 +746,7 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'hit': {
+        if (p && p.spectator) return;
         if (!p || !room.started || p.dead || room.matchOver) return;
         const target = room.players.get(String(msg.target));
         if (!target || target.dead || !target.inGame) return;
@@ -766,7 +769,7 @@ wss.on('connection', (ws) => {
 const BOT_SPEED = 5.2;            // m/s, slightly slower than sprinting humans
 const BOT_SIGHT = 50;             // engagement range (m)
 function tickBots(room, dt) {
-  const alive = [...room.players.entries()].filter(([, q]) => q.inGame && !q.dead);
+  const alive = [...room.players.entries()].filter(([, q]) => q.inGame && !q.dead && !q.spectator);
   for (const [bid, bot] of room.players) {
     if (!bot.bot || !bot.inGame || bot.dead) continue;
     // fall toward the ground if spawned elevated (bots live at ground level)
@@ -870,7 +873,7 @@ setInterval(() => {
       }
     }
     const state = {};
-    for (const [id, p] of room.players) if (p.inGame) state[id] = { pos: p.pos, ry: p.ry, pitch: p.pitch, w: p.w || 1, ads: !!p.ads, rel: !!p.rel, fl: !!p.fl, sl: !!p.sl, wj: !!p.wj, air: !!p.air, spr: !!p.spr };
+    for (const [id, p] of room.players) if (p.inGame && !p.spectator) state[id] = { pos: p.pos, ry: p.ry, pitch: p.pitch, w: p.w || 1, ads: !!p.ads, rel: !!p.rel, fl: !!p.fl, sl: !!p.sl, wj: !!p.wj, air: !!p.air, spr: !!p.spr };
     broadcastRoom(room, { t: 'states', players: state });
 
     if (regenTick % 10 === 0) {

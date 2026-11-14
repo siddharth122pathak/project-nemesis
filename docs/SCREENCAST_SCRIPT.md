@@ -14,8 +14,10 @@ http://localhost:8090/cod/, create a Shipment or Firing Range match, add one AI,
    starts knowing nothing. Every tick it checks where I actually went and updates. Watch the
    learned error in the panel drop below lead, and the hit rate climb."
 5. **Evidence (30 s).** Show `npm run eval` output and `docs/images/learning_curve.png`. "Against
-   scripted test players, learned aim hits a strafer 71% of the time versus 48% for lead. It still
-   loses to random jukes, and it is too strong against circling, which is what the fairness governor
-   is for."
+   scripted test players, learned aim hits a strafer 79% of the time versus 48% for lead. Against
+   random jukes it ties lead, and it is too strong against circling, which is what the fairness
+   governor is for."
+   Optional: play 20 s of `docs/media/aiview_gameplay.mp4` (or open the AI view tab live) to show
+   what the bot sees: the three prediction ghosts and where it is aiming.
 6. **Wrap-up (15 s).** Show `npm test` passing, the repo, and the v0.1.0 release. "Next: play-style
    detection and the from-scratch PPO training pipeline."

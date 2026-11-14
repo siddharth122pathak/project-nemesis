@@ -6,7 +6,12 @@ Nemesis Engine adds an AI opponent that learns how you play to **LAB ARENA**, my
 multiplayer 3D shooter (three.js client, Node.js server). The goal is a bot that does not just aim
 at you faster: it learns where you are going to be.
 
-![Gameplay, v0.1.0](docs/images/gameplay.png)
+![AI view: the bot learning where the player will be](docs/media/aiview_learned.gif)
+
+*AI view, recorded in-game: an over-the-shoulder camera on the bot. The ghosts show where each aim
+model expects the player to be 0.3 s from now (gray naive, yellow lead, green learned), the red line
+is where the bot is aiming, and the red dot is its last shot. Full 2-minute clip:
+[docs/media/aiview_gameplay.mp4](docs/media/aiview_gameplay.mp4).*
 
 ## Milestone 1 (v0.1.0)
 
@@ -23,9 +28,15 @@ There are three aim modes. The host switches between them in a match with **N**:
 | Lead | Assumes you keep moving in a straight line at your current velocity. |
 | Learned | An online model that learns your movement habits while you play. |
 
-The learned model is a small linear model per player, trained online with recursive least squares.
-It looks at your recent velocity relative to the bot (toward/away, left/right) and how long you have
-been strafing in one direction. Every tick it checks where you actually went and updates itself.
+Learned mode learns two things about each player while they play:
+
+1. **How they move.** A small linear model trained online with recursive least squares (your recent
+   velocity relative to the bot, how long you have held a strafe direction), and a record of your
+   strafe rhythm (how long you usually hold a direction before reversing).
+2. **Which forecast actually lands on them.** It scores three candidate aim points against where you
+   really went (the RLS forecast, the rhythm forecast, and a plain straight-line lead) and fires
+   with whichever has the best recent hit rate. Against a player with no pattern it falls back to
+   lead, so it is never worse than lead.
 The Nemesis panel in the top right scores all three modes against your real movement, so you can
 watch the learned model's error drop. Later milestones replace this model with a player-style model
 and reinforcement learning counter-policies trained with my own PPO implementation.
@@ -37,17 +48,32 @@ same reaction delay, aim spread, and hit radius as the server. Bot hit rate:
 
 | Test player | Naive | Lead | Learned |
 |---|---|---|---|
-| Strafer (reverses every 1.2 s) | 29.8% | 47.7% | **71.1%** |
-| ZigZag (diagonal switches every 0.5 s) | 8.7% | 40.3% | **75.6%** |
-| Circler (circles the bot) | 0.0% | 76.5% | **96.6%** |
-| Juker (random reversals) | 5.8% | **42.1%** | 25.5% |
+| Strafer (reverses every 1.2 s) | 29.8% | 47.7% | **78.5%** |
+| ZigZag (diagonal switches every 0.5 s) | 8.7% | 40.3% | **83.4%** |
+| Circler (circles the bot) | 0.0% | 76.5% | **96.4%** |
+| Juker (random reversals) | 5.8% | 42.1% | 42.1% |
 
-The learned bot is best against players with habits. Against random jukes, it is closer on average
-than lead aim (chart below) but lands fewer exact hits, because it hedges between directions. Two
-problems to fix next: the Juker case, and the Circler case, where 96.6% is too punishing and is the
-reason the fairness governor in the design exists.
+The learned bot is best against players with habits and ties lead against random jukes (nothing to
+learn). The 96.4% against circling is too punishing; that is what the fairness governor in the
+design is for.
+
+**In the real game** (the AI-view recording above: a scripted player strafing on a 1.1 s rhythm in
+the Firing Range, 0.3 s reaction delay, aim spread, line of sight required), the bot hit 0% in naive
+mode (0/8), 22% in lead mode (2/9), and 42% in learned mode (11/26), with learned starting from a
+wiped model. The scripted player there is jerkier than in the headless test because the browser
+runs slowly in software rendering, so the learned bot spends much of the clip on its lead fallback
+before its rhythm forecast takes over. Samples are small; the headless table is the controlled
+comparison.
 
 ![Forecast error over time](docs/images/learning_curve.png)
+
+### More screenshots
+
+| Naive | Lead | Learned, after training |
+|---|---|---|
+| ![naive](docs/media/aiview_naive.png) | ![lead](docs/media/aiview_lead.png) | ![learned](docs/media/aiview_learned_trained.png) |
+
+The player's own view, with the Nemesis panel: ![player view](docs/media/player_view.png)
 
 ## Run it
 
@@ -61,6 +87,14 @@ npm run eval         # headless bot evaluation, writes eval_out/
 ```
 
 In the game: PLAY, DEPLOY, then **+ ADD AI** in the lobby and START GAME.
+
+**AI view:** while a match is running, open a second tab at
+`http://localhost:8090/cod/?name=AIVIEW&code=<room code>&spectate=1`. The observer is invisible to
+everyone and bots ignore it; it rides over the first bot's shoulder and shows its predictions.
+
+**Re-record the clip:** `NEMESIS_NO_BOT_DAMAGE=1 npm start` in one terminal, then
+`node tools/record.js 8090` (headless Chromium via Playwright). No-damage mode only keeps the
+scripted player alive for the camera; hits are still counted.
 
 | Key | Action |
 |---|---|
@@ -81,10 +115,15 @@ All original LAB ARENA controls still work (see the in-game menu).
 | `public/cod/` | LAB ARENA browser client (three.js). Adds the Nemesis panel and keys. |
 | `tools/eval.js` | Headless evaluator with scripted test players. |
 | `tools/screenshot.js` | Dev helper that plays a short match in headless Chromium and saves a screenshot. |
+| `tools/record.js` | Records the AI-view clip and screenshots (scripted player + invisible observer). |
+| `docs/media/` | AI-view recording, GIF, and screenshots. |
 | `tests/` | `node:test` unit tests and an end-to-end server test. |
 
 `heromode-server.js`, `nfs-server.js`, and `fight-server.js` are LAB ARENA modules the server loads
 for its other game modes; they are unchanged.
+
+Set `NEMESIS_LOG=moves.csv` when starting the server to log every player's position each tick
+(training data for later milestones).
 
 ## Rules this project follows
 

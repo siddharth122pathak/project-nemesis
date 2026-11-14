@@ -497,6 +497,13 @@
     <p>next match starting in a few seconds...</p>
   </div>
   <div class="hud" id="ping"></div>
+  <div class="hud" id="aiPovHud" style="left: 24px; top: 24px; color: #e8f0f4; font-size: 13px; font-family: Menlo, monospace; background: #000c; padding: 12px 16px; border-radius: 8px; border-left: 3px solid #ff6655; display: none; line-height: 1.5;"></div>
+  <style>
+    body.aipov #aiPovHud { display: block !important; }
+    body.aipov #crosshair, body.aipov #healthWrap, body.aipov #ammoHud, body.aipov #nadeHud,
+    body.aipov #weaponHud, body.aipov #nemesisHud, body.aipov #perfHud, body.aipov #hitMarker,
+    body.aipov #deathOverlay, body.aipov #ping { display: none !important; }
+  </style>
   <div class="hud" id="nemesisHud" style="right: 30px; top: 120px; color: #cfe; font-size: 12px; font-family: Menlo, monospace; background: #000b; padding: 8px 12px; border-radius: 6px; white-space: pre; display: none;"></div>
   <div class="hud" id="perfHud" style="left: 30px; top: 40px; color: #8fb; font-size: 12px; font-family: Menlo, monospace; background: #000a; padding: 8px 12px; border-radius: 6px; white-space: pre;"></div>
   <div class="hud" id="gpuWarn" style="left: 50%; top: 44px; transform: translateX(-50%); color: #ffb020; background: #2a1a00e0; border: 1px solid #ffb020; padding: 8px 18px; border-radius: 6px; font-size: 13px;"></div>

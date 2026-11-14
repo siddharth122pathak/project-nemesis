@@ -62,7 +62,7 @@ function aimNaive(pos) { return pos.slice(); }
 // Where the player will be after `seconds` if they keep their velocity (hitscan: no bullet flight).
 function aimLead(pos, vel, seconds) { return add(pos, mul(vel, seconds)); }
 
-const FEATURES = 11;
+const FEATURES = 12;
 
 class LearnedPredictor {
   // tickRate: observations per second. maxSpeed: fastest a player moves (m/s), used to normalize.
@@ -78,6 +78,7 @@ class LearnedPredictor {
   }
 
   clearHistory() {
+    this.holds = this.holds || [];   // seconds the player held each strafe direction (kept across respawns)
     this.vel = [];      // newest first
     this.snaps = [];    // newest first: { x, pos, radial }
     this.heldTicks = 0;
@@ -87,6 +88,7 @@ class LearnedPredictor {
   }
 
   reset() {
+    this.holds = [];
     this.clearHistory();
     for (const m of this.models) m.reset();
     this.updates = 0;
@@ -106,8 +108,10 @@ class LearnedPredictor {
     });
     x[8] = len(sub(pos, shooterPos)) / 40;
     // How long the player has kept strafing one way; captures timed reversals.
-    x[9] = x[1] * Math.min(this.heldTicks / (1.5 * this.tickRate), 1);
-    x[10] = 1;
+    const held = Math.min(this.heldTicks / (1.5 * this.tickRate), 1);
+    x[9] = x[1] * held;
+    x[10] = x[1] * held * held;   // lets a linear model bend: reversals come after a typical hold time
+    x[11] = 1;
     return x;
   }
 
@@ -122,7 +126,14 @@ class LearnedPredictor {
 
     const lat = dot(vel, perp(radial));
     const sign = lat > 0.5 ? 1 : lat < -0.5 ? -1 : 0;
-    if (sign !== 0 && sign !== this.lastSign) { this.heldTicks = 0; this.lastSign = sign; } else this.heldTicks++;
+    if (sign !== 0 && sign !== this.lastSign) {
+      if (this.lastSign !== 0 && this.heldTicks >= 2) {
+        this.holds.push(this.heldTicks / this.tickRate);
+        if (this.holds.length > 40) this.holds.shift();
+      }
+      this.heldTicks = 0;
+      this.lastSign = sign;
+    } else this.heldTicks++;
 
     this.vel.unshift(vel);
     if (this.vel.length > Math.max(...this.lags) + 1) this.vel.pop();
@@ -163,6 +174,25 @@ class LearnedPredictor {
     return mul(this.horizonDisplacement(H.length - 1), t / H[H.length - 1]);
   }
 
+  // Rhythm forecast: from this player's own strafe hold times, how likely is a reversal in the next
+  // `seconds`, and when? Commits to one outcome (keep going or reverse) instead of averaging them.
+  rhythmPoint(seconds) {
+    const now = this.snaps[0];
+    if (!now || !this.lastPos) return null;
+    const held = this.heldTicks / this.tickRate;
+    const later = this.holds.filter((d) => d > held);
+    if (this.holds.length < 6 || later.length < 3) return aimLead(this.lastPos, this.lastVel, seconds);
+    const soon = later.filter((d) => d <= held + seconds).map((d) => d - held).sort((a, b) => a - b);
+    const lat = perp(now.radial);
+    const vr = dot(this.lastVel, now.radial), vl = dot(this.lastVel, lat);
+    let latDisp = vl * seconds;
+    if (soon.length / later.length >= 0.5) {
+      const tau = soon[soon.length >> 1];          // median time until the reversal
+      latDisp = vl * tau - vl * (seconds - tau);   // reverse at the same speed
+    }
+    return add(this.lastPos, add(mul(now.radial, vr * seconds), mul(lat, latDisp)));
+  }
+
   // Aim point `seconds` ahead; uses constant-velocity lead until the model has warmed up.
   aim(seconds) {
     if (!this.lastPos) return [0, 0];
@@ -171,13 +201,17 @@ class LearnedPredictor {
   }
 }
 
-// Scores all three modes in parallel against where the player actually was `seconds` later.
+// Scores predictors in parallel against where the player actually was `seconds` later:
+// mean error (meters) and the share of predictions that would have hit (within hitRadius).
+const SCORED = ['naive', 'lead', 'model', 'rhythm', 'learned'];
 class Scoreboard {
-  constructor({ tickRate = 20, seconds = 0.5, memorySeconds = 10 } = {}) {
+  constructor({ tickRate = 20, seconds = 0.5, memorySeconds = 10, hitRadius = 0.45 } = {}) {
     this.delay = Math.round(seconds * tickRate);
     this.alpha = 1 / (memorySeconds * tickRate);
+    this.hitRadius = hitRadius;
     this.pending = [];
-    this.err = { naive: 0, lead: 0, learned: 0 };
+    this.err = Object.fromEntries(SCORED.map((k) => [k, 0]));
+    this.hit = Object.fromEntries(SCORED.map((k) => [k, 0]));
     this.samples = 0;
   }
 
@@ -185,9 +219,14 @@ class Scoreboard {
     this.pending.push(predictions);
     if (this.pending.length <= this.delay) return;
     const old = this.pending.shift();
-    for (const m of MODES) {
+    for (const m of SCORED) {
+      if (!old[m]) continue;
       const e = len(sub(old[m], actualPos));
+      // Soft hit: a near-miss counts partly, because the bot's aim has spread on top of the guess.
+      const w = this.hitRadius * 0.75;
+      const h = Math.exp(-(e * e) / (2 * w * w));
       this.err[m] = this.samples === 0 ? e : this.err[m] + this.alpha * (e - this.err[m]);
+      this.hit[m] = this.samples === 0 ? h : this.hit[m] + this.alpha * (h - this.hit[m]);
     }
     this.samples++;
   }
@@ -196,9 +235,16 @@ class Scoreboard {
 }
 
 // One tracker per human player: owns their predictor and scoreboard.
+// "learned" mode learns two things about each player. First, how they move: an RLS movement model
+// and the rhythm of their strafes (hold times). Second, which aiming strategy actually lands on
+// them: the RLS forecast, the rhythm forecast, or a plain straight-line lead. The second part
+// matters because a squared-error model aims at the average of the player's options (keep going
+// vs. reverse) and can miss both, where committing to the likely one would hit.
+const CANDIDATES = ['lead', 'model', 'rhythm'];
 class PlayerTracker {
   constructor(opts = {}) {
     this.seconds = opts.seconds || 0.5;
+    this.choice = 'lead';
     this.predictor = new LearnedPredictor(opts);
     this.scoreboard = new Scoreboard(opts);
     this.stats = { naive: { shots: 0, hits: 0 }, lead: { shots: 0, hits: 0 }, learned: { shots: 0, hits: 0 } };
@@ -210,23 +256,36 @@ class PlayerTracker {
     if (jumped) this.scoreboard.clear();
     p.observe(pos, shooterPos);
     this.scoreboard.record(this.predictAll(this.seconds), pos);
+    this.updateChoice();
+  }
+
+  // Pick the strategy with the better recent hit share; switch only on a clear margin.
+  updateChoice() {
+    const h = this.scoreboard.hit;
+    if (!this.predictor.warmedUp || this.scoreboard.samples < 40) { this.choice = 'lead'; return; }
+    let best = this.choice;
+    for (const c of CANDIDATES) if (h[c] > h[best] + 0.03) best = c;
+    this.choice = best;
   }
 
   predictAll(seconds) {
     const p = this.predictor;
-    if (!p.lastPos) return { naive: [0, 0], lead: [0, 0], learned: [0, 0] };
-    return {
+    if (!p.lastPos) return { naive: [0, 0], lead: [0, 0], model: [0, 0], rhythm: [0, 0], learned: [0, 0] };
+    const out = {
       naive: aimNaive(p.lastPos),
       lead: aimLead(p.lastPos, p.lastVel, seconds),
-      learned: add(p.lastPos, p.predictDisplacement(seconds)),
+      model: p.warmedUp ? add(p.lastPos, p.predictDisplacement(seconds)) : aimLead(p.lastPos, p.lastVel, seconds),
+      rhythm: p.rhythmPoint(seconds) || aimLead(p.lastPos, p.lastVel, seconds),
     };
+    out.learned = out[this.choice];
+    return out;
   }
 
   aimPoint(mode, seconds) {
     const p = this.predictor;
     if (mode === 'naive') return aimNaive(p.lastPos);
     if (mode === 'lead') return aimLead(p.lastPos, p.lastVel, seconds);
-    return p.aim(seconds);
+    return this.predictAll(seconds).learned;
   }
 }
 

@@ -66,3 +66,10 @@ test('tracker scores all three modes in parallel', () => {
   assert.ok(tr.scoreboard.samples > 200);
   for (const m of ['naive', 'lead', 'learned']) assert.ok(Number.isFinite(tr.scoreboard.err[m]));
 });
+
+test('learned mode is never worse than lead on any scripted player', () => {
+  for (const style of ['Strafer', 'ZigZag', 'Circler', 'Juker']) {
+    const lead = runOne(style, 'lead', 120), learned = runOne(style, 'learned', 120);
+    assert.ok(learned.hits / learned.shots >= lead.hits / lead.shots - 0.02, `${style}: learned ${learned.hits}/${learned.shots} vs lead ${lead.hits}/${lead.shots}`);
+  }
+});

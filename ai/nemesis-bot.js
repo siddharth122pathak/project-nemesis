@@ -13,6 +13,13 @@ const BODY_RADIUS = 0.45;        // matches PLAYER_RADIUS in the client
 const AIM_NOISE_PER_M = 0.012;   // aim spread grows with distance (std dev in m per m of range)
 const HUD_EVERY_TICKS = 10;      // HUD update twice a second
 
+// Optional movement telemetry (NEMESIS_LOG=path.csv): training and replay data for later milestones.
+const LOG = process.env.NEMESIS_LOG ? require('fs').createWriteStream(process.env.NEMESIS_LOG, { flags: 'a' }) : null;
+if (LOG) LOG.write('wall_ms,room,tick,player,x,z,bot_x,bot_z,mode\n');
+
+// NEMESIS_NO_BOT_DAMAGE=1: bot hits are scored but deal no damage (used only for demo recordings).
+const NO_DAMAGE = process.env.NEMESIS_NO_BOT_DAMAGE === '1';
+
 const START_MODE = MODES.includes(process.env.NEMESIS_MODE) ? process.env.NEMESIS_MODE : 'learned';
 
 function state(room) {
@@ -38,7 +45,7 @@ function observe(room) {
   const bots = [...room.players.values()].filter((q) => q.bot && q.inGame && !q.dead);
   if (!bots.length) return;
   for (const [id, p] of room.players) {
-    if (p.bot || !p.inGame || p.dead || !Array.isArray(p.pos)) continue;
+    if (p.bot || p.spectator || !p.inGame || p.dead || !Array.isArray(p.pos)) continue;
     const pos = [p.pos[0], p.pos[2]];
     let near = bots[0], best = Infinity;
     for (const b of bots) {
@@ -46,6 +53,7 @@ function observe(room) {
       if (d < best) { best = d; near = b; }
     }
     tracker(room, id).observe(pos, [near.pos[0], near.pos[2]]);
+    if (LOG) LOG.write(`${Date.now()},${room.code},${s.tick},${id},${pos[0].toFixed(3)},${pos[1].toFixed(3)},${near.pos[0].toFixed(3)},${near.pos[2].toFixed(3)},${s.mode}\n`);
   }
 }
 
@@ -74,6 +82,7 @@ function resolveShots(room, api) {
     const dx = aim[0] - origin[0], dy = aimY - origin[1], dz = aim[1] - origin[2];
     const L = Math.hypot(dx, dy, dz) || 1;
     api.broadcastRoom(room, { t: 'shot', from: shot.botId, origin, dir: [dx / L, dy / L, dz / L], w: bot.w });
+    s.lastShot = { tick: s.tick, botId: shot.botId, targetId: shot.targetId, aim, mode: shot.mode, decidedAt: shot.aim };
 
     const st = tracker(room, shot.targetId).stats[shot.mode];
     st.shots++;
@@ -82,6 +91,7 @@ function resolveShots(room, api) {
     const blocked = api.segmentBlocked(room.map, origin[0], origin[1], origin[2], t.pos[0], t.pos[1] + 1.4, t.pos[2]);
     if (miss < BODY_RADIUS && vertical < 1.0 && !blocked) {
       st.hits++;
+      if (NO_DAMAGE) continue;   // recording mode: count the hit, keep the player alive
       const head = Math.random() < 0.12;   // same headshot share as the original bots
       const base = api.weaponDamage[bot.w] || 25;
       const fall = Math.max(0.4, 1 - Math.max(0, range - 12) * 0.02);
@@ -96,19 +106,51 @@ function sendHud(room) {
   const s = state(room);
   if (s.tick % HUD_EVERY_TICKS) return;
   for (const [id, p] of room.players) {
-    if (p.bot || !p.ws || p.ws.readyState !== 1 || !s.trackers.has(id)) continue;
+    if (p.bot || p.spectator || !p.ws || p.ws.readyState !== 1 || !s.trackers.has(id)) continue;
     const tr = s.trackers.get(id);
     p.ws.send(JSON.stringify({
       t: 'nemesis', mode: s.mode, horizon: REACTION_S,
       err: tr.scoreboard.err, stats: tr.stats,
-      updates: tr.predictor.updates, warm: tr.predictor.warmedUp,
+      updates: tr.predictor.updates, warm: tr.predictor.warmedUp, choice: tr.choice,
     }));
   }
+}
+
+// AI view: every other tick, send observers what the first bot sees and predicts about its target.
+function sendPov(room, api) {
+  const s = state(room);
+  if (s.tick % 2) return;
+  const watchers = [...room.players.values()].filter((p) => p.spectator && p.ws && p.ws.readyState === 1);
+  if (!watchers.length) return;
+  const botEntry = [...room.players.entries()].find(([, q]) => q.bot && q.inGame);
+  if (!botEntry) return;
+  const [botId, bot] = botEntry;
+  let target = null, best = Infinity;
+  for (const [id, p] of room.players) {
+    if (p.bot || p.spectator || !p.inGame || p.dead || !s.trackers.has(id)) continue;
+    const d = Math.hypot(p.pos[0] - bot.pos[0], p.pos[2] - bot.pos[2]);
+    if (d < best) { best = d; target = [id, p]; }
+  }
+  const msg = { t: 'nemesispov', botId, botPos: bot.pos, botDead: !!bot.dead, mode: s.mode, horizon: REACTION_S };
+  if (target) {
+    const [tid, t] = target;
+    const tr = s.trackers.get(tid);
+    msg.los = !api.segmentBlocked(room.map, bot.pos[0], bot.pos[1] + 1.6, bot.pos[2], t.pos[0], t.pos[1] + 1.4, t.pos[2]);
+    Object.assign(msg, {
+      targetId: tid, targetName: t.name, targetPos: t.pos, predictions: tr.predictor.lastPos ? tr.predictAll(REACTION_S) : null,
+      err: tr.scoreboard.err, stats: tr.stats, updates: tr.predictor.updates, warm: tr.predictor.warmedUp,
+      choice: tr.choice,
+    });
+  }
+  if (s.lastShot && s.tick - s.lastShot.tick < 12) msg.lastShot = s.lastShot;
+  const data = JSON.stringify(msg);
+  for (const w of watchers) w.ws.send(data);
 }
 
 function tick(room, api) {
   resolveShots(room, api);
   sendHud(room);
+  sendPov(room, api);
 }
 
 function cycleMode(room) {
