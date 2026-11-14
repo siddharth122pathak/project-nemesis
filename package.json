@@ -1,0 +1,25 @@
+{
+  "name": "project-nemesis",
+  "version": "0.1.0",
+  "description": "Nemesis Engine: LAB ARENA shooter with bots that learn where you will be",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:lan": "HOST=0.0.0.0 node server.js",
+    "test": "node --test tests/*.test.js",
+    "eval": "node tools/eval.js"
+  },
+  "keywords": [],
+  "author": "Siddharth Pathak",
+  "license": "ISC",
+  "dependencies": {
+    "three": "^0.185.1",
+    "ws": "^8.21.1"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0"
+  }
+}

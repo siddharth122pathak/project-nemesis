@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --omit=dev
+      - name: Unit and end-to-end tests
+        run: npm test
+      - name: Headless bot evaluation
+        run: npm run eval
+      - name: Package build
+        run: |
+          mkdir -p dist/project-nemesis
+          cp -R server.js heromode-server.js nfs-server.js fight-server.js mapdata.json rampdata.json \
+                package.json package-lock.json README.md THIRD_PARTY_ASSETS.md ai public tools dist/project-nemesis/
+          cp eval_out/*.csv eval_out/summary.json dist/project-nemesis/
+          cd dist && zip -qr ../project-nemesis-${{ github.ref_name }}.zip project-nemesis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: project-nemesis-build
+          path: project-nemesis-*.zip
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: project-nemesis-*.zip

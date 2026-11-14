@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>rig test</title>
+<style>body{margin:0;background:#556}#info{position:fixed;left:8px;top:8px;color:#fff;font:12px Menlo;white-space:pre}</style>
+<script type="importmap">
+  { "imports": {
+    "three": "/node_modules/three/build/three.module.js",
+    "three/addons/": "/node_modules/three/examples/jsm/"
+  } }
+</script>
+</head>
+<body>
+<div id="info"></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const Q = new URLSearchParams(location.search);
+const anim = Q.get('anim') || 'Idle';
+const gunFile = Q.get('gun') || 'rifle';
+const view = Q.get('view') || 'front'; // front | side | three-quarter
+const t = parseFloat(Q.get('t') || '0.5'); // anim time to freeze at
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x88aacc);
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
+const D = 3.4, H = 1.35;
+if (view === 'front') camera.position.set(0, H, D);
+else if (view === 'face') camera.position.set(0, H, -D);
+else if (view === 'tqface') camera.position.set(D*0.7, H+0.25, -D*0.7);
+else if (view === 'side') camera.position.set(D, H, 0);
+else if (view === 'left') camera.position.set(-D*0.75, H+0.25, D*0.75);
+else camera.position.set(D*0.75, H+0.25, D*0.75);
+camera.lookAt(0, 1.1, 0);
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 1.2));
+const dl = new THREE.DirectionalLight(0xffffff, 1.6); dl.position.set(3,5,4); scene.add(dl);
+scene.add(new THREE.GridHelper(6, 12));
+
+// ---- tunables (same shape as game.js will use) ----
+window.GUN_GRIP = { pos: [0, 0.06, 0.03], rot: [-1.5708, 0, -1.5708], scale: 1.0 };
+// pose override: bone -> euler xyz (radians), applied AFTER mixer.update
+window.HOLD_POSE = {
+  'RightArm':     [0.9, -0.25, 0.0],
+  'RightForeArm': [0.35, 0.0, 0.0],
+  'RightHand':    [0.0, 0.0, 0.0],
+  'LeftArm':      [0.9, 0.35, 0.0],
+  'LeftForeArm':  [0.5, 0.0, 0.9],
+  'LeftHand':     [0.0, 0.0, 0.0],
+};
+window.POSE_MODE = Q.get('pose') || 'override'; // 'override' | 'add' | 'off'
+
+const loader = new GLTFLoader();
+let mixer, soldier, handBone, gunAnchor;
+const bones = {};
+
+function applyGrip() {
+  if (!gunAnchor) return;
+  const inv = 1 / (window.__handScale || 1);
+  gunAnchor.position.set(GUN_GRIP.pos[0]*inv, GUN_GRIP.pos[1]*inv, GUN_GRIP.pos[2]*inv);
+  gunAnchor.rotation.set(...window.GUN_GRIP.rot);
+  gunAnchor.scale.setScalar(window.GUN_GRIP.scale * inv);
+}
+window.applyGrip = applyGrip;
+
+loader.load('./models/soldier.glb', (g) => {
+  soldier = g.scene;
+  scene.add(soldier);
+  soldier.traverse(o => { if (o.isBone) bones[o.name.replace(/^mixamorig:?/, '')] = o; });
+  window.__bones = bones;
+  window.__boneNames = Object.keys(bones);
+  handBone = bones['RightHand'];
+  const skinned = [];
+  soldier.traverse(o => { if (o.isSkinnedMesh) skinned.push(o); });
+  // measure hand bone world scale (mixamo rigs are often 0.01)
+  const ws = new THREE.Vector3(); handBone.getWorldScale(ws);
+  window.__handScale = ws.x;
+
+  gunAnchor = new THREE.Group();
+  handBone.add(gunAnchor);
+  // counteract bone scale so gun params are in meters
+  gunAnchor.scale.setScalar(1/ws.x);
+
+  loader.load(`./models/${gunFile}.glb`, (gg) => {
+    const box = new THREE.Box3().setFromObject(gg.scene);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    gg.scene.position.sub(center);
+    const wrap = new THREE.Group();
+    wrap.scale.setScalar(0.8 / Math.max(size.z, 0.001));
+    wrap.add(gg.scene);
+    gunAnchor.add(wrap);
+    applyGrip();
+    window.__gunLoaded = true;
+  });
+
+  mixer = new THREE.AnimationMixer(soldier);
+  const clip = THREE.AnimationClip.findByName(g.animations, anim);
+  const act = mixer.clipAction(clip); act.play();
+  mixer.update(t); // jump to time t
+  soldier.updateMatrixWorld(true);
+  soldier.traverse(o => { if (o.isBone) baseQuat[o.name.replace(/^mixamorig:?/, '')] = o.quaternion.clone(); });
+  window.__ready = true;
+});
+
+const baseQuat = {};
+const _qOff = new THREE.Quaternion(), _e = new THREE.Euler();
+function applyPose() {
+  if (window.POSE_MODE === 'off') return;
+  for (const [name, e] of Object.entries(window.HOLD_POSE)) {
+    const b = bones[name];
+    if (!b) continue;
+    _e.set(e[0], e[1], e[2]);
+    _qOff.setFromEuler(_e);
+    if (window.POSE_MODE === 'override') b.quaternion.copy(_qOff);
+    else b.quaternion.copy(baseQuat[name]).multiply(_qOff);
+  }
+}
+
+let frozen = Q.has('freeze');
+const clock = new THREE.Clock();
+function loop() {
+  requestAnimationFrame(loop);
+  const dt = clock.getDelta();
+  if (mixer && !frozen) mixer.update(dt);
+  applyPose();
+  applyGrip();
+  renderer.render(scene, camera);
+}
+loop();
+document.getElementById('info').textContent = `anim=${anim} gun=${gunFile} view=${view} pose=${window.POSE_MODE}`;
+</script>
+</body>
+</html>
