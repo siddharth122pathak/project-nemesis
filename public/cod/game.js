@@ -2325,6 +2325,7 @@ document.addEventListener('keydown', (e) => {
   // Nemesis: N cycles the bots' aim mode (host), Shift+N resets the learned models, H hides the panel
   if (e.code === 'KeyN' && !e.repeat) send({ t: e.shiftKey ? 'nemesisreset' : 'nemesismode' });
   if (e.code === 'KeyH' && !e.repeat) nemesisHudHidden = !nemesisHudHidden;
+  if (e.code === 'KeyB' && !e.repeat) send({ t: 'nemesisstyle' });   // demo: switch the target's movement
 });
 document.addEventListener('keyup', (e) => {
   keys[e.code] = false;
@@ -3062,7 +3063,9 @@ function updatePlayer(dt) {
 let ws = null;
 // Nemesis AI view (?spectate=1): an invisible observer rides along in the bot's eyes and sees
 // where each aim model thinks the target will be. Gray = naive, yellow = lead, green = learned.
-const AIPOV = window.__aipov = { on: new URLSearchParams(location.search).get('spectate') === '1', data: null, at: 0, markers: null, cam: null, look: null };
+const AIPOV_Q = new URLSearchParams(location.search);
+const AIPOV = window.__aipov = { demo: AIPOV_Q.get('demo') === '1', on: AIPOV_Q.get('spectate') === '1' || AIPOV_Q.get('demo') === '1', data: null, at: 0, markers: null, cam: null, look: null };
+if (AIPOV.on) document.body.classList.add('aipov');
 const AIPOV_COLORS = { naive: 0xaaaaaa, lead: 0xf0c83c, learned: 0x50dc78 };
 function aiPovSetup() {
   if (AIPOV.markers) return;
@@ -3147,12 +3150,19 @@ function aiPovUpdate(dt) {
   const er = d.err || {}, st = d.stats || {};
   const rate = (m) => { const x = st[m] || { shots: 0, hits: 0 }; return x.shots ? `${Math.round(100 * x.hits / x.shots)}% (${x.hits}/${x.shots})` : '--'; };
   const name = bot ? bot.name : 'BOT';
+  if (!d.targetId) {
+    el.innerHTML = `<div style="font-size:18px;letter-spacing:3px;color:#ff6655">AI VIEW &middot; ${name}</div>`
+      + `<div style="color:#fc8">no human target in this match yet.</div>`
+      + `<div style="color:#9ab">play in another browser WINDOW (not a tab) placed side by side,<br>or open <b>/cod/?demo=1</b> to watch the bot hunt a scripted target.</div>`;
+    return;
+  }
   const line = (m, label, col) => `<div style="color:${col}">${m === d.mode ? '&#9654;' : '&nbsp;&nbsp;'} ${label.padEnd(8, ' ').replace(/ /g, '&nbsp;')} error ${(er[m] || 0).toFixed(2)} m &nbsp; hits ${rate(m)}</div>`;
   el.innerHTML = `<div style="font-size:18px;letter-spacing:3px;color:#ff6655">AI VIEW &middot; ${name}</div>`
     + `<div>target <b>${d.targetName || '--'}</b> &middot; aim mode <b>${String(d.mode).toUpperCase()}</b> &middot; predicting ${d.horizon}s ahead &middot; ${d.los ? '<span style="color:#7f7">line of sight</span>' : '<span style="color:#f88">no line of sight</span>'}</div>`
     + `<div style="color:#9ab">${d.warm ? 'model trained' : 'model warming up'} &middot; ${d.updates || 0} updates &middot; learned is using its ${({ model: 'movement forecast', rhythm: 'strafe-rhythm forecast', lead: 'straight-line lead' })[d.choice] || 'straight-line lead'}</div><div style="height:6px"></div>`
     + line('naive', 'NAIVE', '#bbb') + line('lead', 'LEAD', '#f0c83c') + line('learned', 'LEARNED', '#50dc78')
-    + `<div style="height:6px"></div><div style="color:#9ab;font-size:11px">ghosts = where each model expects ${d.targetName || 'the target'} in ${d.horizon}s &middot; red dot = last shot</div>`;
+    + `<div style="height:6px"></div><div style="color:#9ab;font-size:11px">ghosts = where each model expects ${d.targetName || 'the target'} in ${d.horizon}s &middot; red dot = last shot</div>`
+    + (d.demo ? `<div style="color:#9ab;font-size:11px">target moves: <b style="color:#fff">${d.style === 'random' ? 'random jukes' : 'steady rhythm'}</b> &middot; [N] aim mode &middot; [Shift+N] reset model &middot; [B] target style</div>` : '');
 }
 
 // Nemesis panel: how well each aim model predicts where you will be (server-side, per player)
@@ -3176,7 +3186,9 @@ function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg))
 function connect(action, name, code) {
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${wsProto}://${location.host}`);
-  ws.onopen = () => send(action === 'create' ? { t: 'create', name } : { t: 'join', name, code, spectate: AIPOV.on });
+  ws.onopen = () => send(action === 'create'
+    ? { t: 'create', name, ...(AIPOV.demo ? { demo: true, map: AIPOV_Q.get('map') || 'range', style: AIPOV_Q.get('style') || 'rhythm' } : {}) }
+    : { t: 'join', name, code, spectate: AIPOV.on });
   ws.onclose = (ev) => {
     if (ev.target.intentional) return;
     document.getElementById('ping').textContent = 'DISCONNECTED — refresh to rejoin';
@@ -3273,6 +3285,7 @@ function connect(action, name, code) {
       case 'nemesis': renderNemesisHud(msg); break;
       case 'nemesispov': AIPOV.data = msg; AIPOV.at = performance.now(); break;
       case 'nemesismode': showSensToast(`BOT AIM: ${String(msg.mode).toUpperCase()}`); break;
+      case 'nemesisstyle': showSensToast(`TARGET MOVES: ${msg.style === 'random' ? 'RANDOM JUKES' : 'STEADY RHYTHM'}`); break;
       case 'shot': {
         const o = new THREE.Vector3().fromArray(msg.origin);
         const d = new THREE.Vector3().fromArray(msg.dir);
@@ -3617,6 +3630,11 @@ let photoMode = false;
 }
 
 document.getElementById('createBtn').addEventListener('click', () => enterRoom('create'));
+// Nemesis demo (?demo=1): create a room that starts straight away with a bot and a scripted target
+if (AIPOV.demo) setTimeout(() => {
+  document.getElementById('nameInput').value = 'VIEWER';
+  enterRoom('create');
+}, 300);
 // shell handoff: /?name=X&create=1 or /?name=X&code=1234 auto-connects past the local landing
 {
   const q = new URLSearchParams(location.search);

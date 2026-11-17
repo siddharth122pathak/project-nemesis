@@ -9,6 +9,7 @@ const HERO = require('./heromode-server.js');
 const NFS = require('./nfs-server.js');   // NFS racing game module (self-contained)
 const FIGHT = require('./fight-server.js');   // FRAME TRAP fighter relay (public/tekken): rooms with game === 'tekken'
 const NEMESIS = require('./ai/nemesis-bot.js');   // Nemesis Engine: bots that predict where humans will be
+const DUMMY = require('./ai/nemesis-dummy.js');   // Nemesis demo: scripted target player for the AI view
 
 const PORT = process.env.PORT || 8090;
 // Listener interface: this computer only by default. LAN parties opt in with HOST=0.0.0.0 (npm run start:lan);
@@ -388,7 +389,7 @@ function removeFromRoom(ws) {
   room.players.delete(id);
   if (room.game === 'tekken') FIGHT.onLeave(room, id);   // frees the seat, tells the other fighter (fleft)
   console.log(`[room ${room.code}] ${p.name} left (${room.players.size} remain)`);
-  const humans = [...room.players.entries()].filter(([, q]) => !q.bot);
+  const humans = [...room.players.entries()].filter(([, q]) => !q.bot && !q.dummy);
   if (humans.length === 0) {   // bots alone can't keep a room alive
     rooms.delete(room.code);
     console.log(`[room ${room.code}] deleted (no humans left)`);
@@ -444,13 +445,23 @@ wss.on('connection', (ws) => {
         const newRoom = { code, hostId: id, started: false, matchOver: false, game,
           map: gameDefaults.map, mode: gameDefaults.mode, players: new Map() };
         rooms.set(code, newRoom);
+        const demo = game === 'cod' && !!msg.demo;   // Nemesis demo: you watch, a bot hunts a scripted target
+        if (demo) { newRoom.map = MAP_IDS.includes(msg.map) ? msg.map : 'range'; newRoom.mode = 'dm'; }
         newRoom.players.set(id, {
           ws, name: String(msg.name || 'player').slice(0, 16),
           color: PLAYER_COLORS[0],
           pos: pickSpawn(newRoom), ry: 0, pitch: 0,
           hp: MAX_HP, kills: 0, deaths: 0, dead: false, inGame: false, w: 1,
+          spectator: demo,
         });
         ws.room = newRoom;
+        if (demo) {
+          addBot(newRoom);
+          DUMMY.addDummy(newRoom, { pickSpawn, playerColor: PLAYER_COLORS[2], style: msg.style === 'random' ? 'random' : 'rhythm' });
+          startMatch(newRoom);
+          console.log(`[room ${code}] Nemesis demo started on ${newRoom.map}`);
+          break;
+        }
         ws.send(JSON.stringify(lobbyState(newRoom, { you: id })));
         if (game === 'tekken') FIGHT.onCreate(newRoom, id);   // seat 0 + froom state
         console.log(`[room ${code}] created by ${newRoom.players.get(id).name}`);
@@ -541,6 +552,13 @@ wss.on('connection', (ws) => {
         // host cycles the bots' aim mode: naive -> lead -> learned
         if (!room || room.hostId !== id) return;
         broadcastRoom(room, { t: 'nemesismode', mode: NEMESIS.cycleMode(room) });
+        break;
+      }
+      case 'nemesisstyle': {
+        // host switches the demo target between a learnable rhythm and random reversals
+        if (!room || room.hostId !== id) return;
+        const style = DUMMY.toggleStyle(room);
+        if (style) broadcastRoom(room, { t: 'nemesisstyle', style });
         break;
       }
       case 'nemesisreset': {
@@ -848,6 +866,7 @@ setInterval(() => {
     if (!room.started || room.players.size === 0) continue;
     if (room.game === 'nfs') { NFS.tick(room, 1 / TICK_RATE, nfsApi); continue; }
     if (!room.matchOver) {
+      DUMMY.tickDummies(room, 1 / TICK_RATE, { posBlocked, segmentBlocked });
       NEMESIS.observe(room);
       tickBots(room, 1 / TICK_RATE);
       NEMESIS.tick(room, { broadcastRoom, applyDamage, segmentBlocked, weaponDamage: BOT_WEAPON_DMG });

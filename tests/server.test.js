@@ -62,3 +62,30 @@ test('server runs Nemesis bots against a strafing human', { timeout: 30000 }, as
     server.kill();
   }
 });
+
+test('demo mode: a bot hunts the scripted target and streams the AI view', { timeout: 30000 }, async () => {
+  const port = PORT + 1;
+  const server = spawn(process.execPath, ['server.js'], {
+    cwd: path.join(__dirname, '..'), env: { ...process.env, PORT: String(port), HOST: '127.0.0.1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      server.stdout.on('data', (d) => { if (String(d).includes('running')) resolve(); });
+      server.on('exit', (c) => reject(new Error('server exited ' + c)));
+    });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    await new Promise((r) => ws.on('open', r));
+    let pov = null;
+    ws.on('message', (raw) => { const m = JSON.parse(raw); if (m.t === 'nemesispov') pov = m; });
+    ws.send(JSON.stringify({ t: 'create', name: 'viewer', demo: true }));
+    await new Promise((r) => setTimeout(r, 10000));
+    ws.close();
+    assert.ok(pov, 'received AI view updates');
+    assert.equal(pov.targetName, 'TARGET');
+    assert.ok(pov.demo && pov.style === 'rhythm');
+    assert.ok(pov.updates > 100, `model updated ${pov.updates} times`);
+  } finally {
+    server.kill();
+  }
+});

@@ -91,7 +91,7 @@ function resolveShots(room, api) {
     const blocked = api.segmentBlocked(room.map, origin[0], origin[1], origin[2], t.pos[0], t.pos[1] + 1.4, t.pos[2]);
     if (miss < BODY_RADIUS && vertical < 1.0 && !blocked) {
       st.hits++;
-      if (NO_DAMAGE) continue;   // recording mode: count the hit, keep the player alive
+      if (NO_DAMAGE || t.dummy) continue;   // demo/recording: count the hit, keep the target alive
       const head = Math.random() < 0.12;   // same headshot share as the original bots
       const base = api.weaponDamage[bot.w] || 25;
       const fall = Math.max(0.4, 1 - Math.max(0, range - 12) * 0.02);
@@ -131,7 +131,9 @@ function sendPov(room, api) {
     const d = Math.hypot(p.pos[0] - bot.pos[0], p.pos[2] - bot.pos[2]);
     if (d < best) { best = d; target = [id, p]; }
   }
-  const msg = { t: 'nemesispov', botId, botPos: bot.pos, botDead: !!bot.dead, mode: s.mode, horizon: REACTION_S };
+  const dummy = [...room.players.values()].find((p) => p.dummy);
+  const msg = { t: 'nemesispov', botId, botPos: bot.pos, botDead: !!bot.dead, mode: s.mode, horizon: REACTION_S,
+    demo: !!dummy, style: dummy ? dummy.dm.style : null };
   if (target) {
     const [tid, t] = target;
     const tr = s.trackers.get(tid);

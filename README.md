@@ -88,7 +88,12 @@ npm run eval         # headless bot evaluation, writes eval_out/
 
 In the game: PLAY, DEPLOY, then **+ ADD AI** in the lobby and START GAME.
 
-**AI view:** while a match is running, open a second tab at
+**AI demo (one tab, no playing needed):** open `http://localhost:8090/cod/?demo=1`. It starts a
+match with one Nemesis bot and a scripted TARGET player and puts you in the AI view. Keys: **N**
+aim mode, **Shift+N** reset the learned model, **B** switch the target between a steady strafe
+rhythm and random jukes. Add `&map=shipment` for another map.
+
+**AI view of your own match:** while a match is running, open a second tab at
 `http://localhost:8090/cod/?name=AIVIEW&code=<room code>&spectate=1`. The observer is invisible to
 everyone and bots ignore it; it rides over the first bot's shoulder and shows its predictions.
 
