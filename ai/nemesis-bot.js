@@ -133,6 +133,7 @@ function sendPov(room, api) {
   }
   const dummy = [...room.players.values()].find((p) => p.dummy);
   const msg = { t: 'nemesispov', botId, botPos: bot.pos, botDead: !!bot.dead, mode: s.mode, horizon: REACTION_S,
+    botState: bot.ai ? bot.ai.state : 'patrol', botGoal: bot.ai && bot.ai.goal ? bot.ai.goal : null,
     demo: !!dummy, style: dummy ? dummy.dm.style : null };
   if (target) {
     const [tid, t] = target;
@@ -163,4 +164,11 @@ function cycleMode(room) {
 
 function resetModels(room) { state(room).trackers.clear(); }
 
-module.exports = { observe, planShot, tick, cycleMode, resetModels, REACTION_S, TICK_RATE };
+// Where the learned model expects player `id` to be `seconds` from now ([x, z]), or null if unknown.
+function predictPosition(room, id, seconds) {
+  const tr = state(room).trackers.get(id);
+  if (!tr || !tr.predictor.lastPos) return null;
+  return tr.predictAll(seconds).learned;
+}
+
+module.exports = { observe, planShot, tick, cycleMode, resetModels, predictPosition, REACTION_S, TICK_RATE };

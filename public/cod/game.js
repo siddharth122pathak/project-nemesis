@@ -3092,6 +3092,11 @@ function aiPovSetup() {
   AIPOV.shot = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), shotMat);
   AIPOV.shot.renderOrder = 1000; AIPOV.shot.raycast = () => {};
   scene.add(AIPOV.shot);
+  // where the bot is heading (cover spot, peek spot, or the predicted position it is hunting)
+  const goalMat = new THREE.MeshBasicMaterial({ color: 0x55aaff, transparent: true, opacity: 0.85, depthTest: false });
+  AIPOV.goal = new THREE.Mesh(new THREE.OctahedronGeometry(0.35), goalMat);
+  AIPOV.goal.renderOrder = 1000; AIPOV.goal.raycast = () => {};
+  scene.add(AIPOV.goal);
 }
 function aiPovUpdate(dt) {
   const d = AIPOV.data;
@@ -3116,6 +3121,7 @@ function aiPovUpdate(dt) {
   raycaster.far = backLen;
   const hitWall = raycaster.intersectObjects(obstacles.map((ob) => ob.mesh), false)[0];
   if (hitWall) eye = head.clone().addScaledVector(back, Math.max(0.2, hitWall.distance - 0.35));
+  if (bot) bot.group.visible = !bot.dead && eye.distanceTo(head) > 1.3;   // camera squeezed into the bot: hide it
   const lookAt = tgtPos.clone().add(new THREE.Vector3(0, 1.0, 0));
   const k = 1 - Math.exp(-dt * 10);
   AIPOV.cam = AIPOV.cam ? AIPOV.cam.lerp(eye, k) : eye;
@@ -3142,6 +3148,12 @@ function aiPovUpdate(dt) {
     const a = botPos.clone().add(new THREE.Vector3(0, 1.6, 0));
     AIPOV.line.geometry.setFromPoints([a, act.position.clone().add(new THREE.Vector3(0, 1.1, 0))]);
   }
+  AIPOV.goal.visible = !!d.botGoal && ['cover', 'hold', 'peek', 'hunt', 'search'].includes(d.botState);
+  if (AIPOV.goal.visible) {
+    AIPOV.goal.position.set(d.botGoal[0], 1.2 + Math.sin(performance.now() / 250) * 0.15, d.botGoal[1]);
+    AIPOV.goal.rotation.y += dt * 2;
+    AIPOV.goal.material.color.setHex(d.botState === 'hunt' || d.botState === 'search' ? 0xff9933 : 0x55aaff);
+  }
   AIPOV.shot.visible = !!d.lastShot;
   if (d.lastShot) AIPOV.shot.position.set(d.lastShot.aim[0], y + 1.2, d.lastShot.aim[1]);
 
@@ -3150,15 +3162,28 @@ function aiPovUpdate(dt) {
   const er = d.err || {}, st = d.stats || {};
   const rate = (m) => { const x = st[m] || { shots: 0, hits: 0 }; return x.shots ? `${Math.round(100 * x.hits / x.shots)}% (${x.hits}/${x.shots})` : '--'; };
   const name = bot ? bot.name : 'BOT';
+  const STATE_TEXT = {
+    engage: ['ENGAGING', '#ff7766', 'strafing and shooting'],
+    cover: ['TAKING COVER', '#66aaff', 'running to a spot the target cannot see (blue marker)'],
+    hold: ['IN COVER', '#66aaff', 'waiting before it peeks'],
+    peek: ['PEEKING', '#66aaff', 'stepping out pre-aimed at the last known spot'],
+    hunt: ['HUNTING', '#ffaa44', 'lost sight: going where the model PREDICTS the target went (orange marker)'],
+    search: ['SEARCHING', '#ffaa44', 'checking around the predicted spot'],
+    patrol: ['PATROLLING', '#9ab', 'no target known'],
+  };
+  const st0 = STATE_TEXT[d.botState] || STATE_TEXT.patrol;
+  const stateLine = `<div style="margin-top:4px">bot is <b style="color:${st0[1]}">${st0[0]}</b> <span style="color:#9ab">&middot; ${st0[2]}</span></div>`;
   if (!d.targetId) {
     el.innerHTML = `<div style="font-size:18px;letter-spacing:3px;color:#ff6655">AI VIEW &middot; ${name}</div>`
       + `<div style="color:#fc8">no human target in this match yet.</div>`
+      + stateLine
       + `<div style="color:#9ab">play in another browser WINDOW (not a tab) placed side by side,<br>or open <b>/cod/?demo=1</b> to watch the bot hunt a scripted target.</div>`;
     return;
   }
   const line = (m, label, col) => `<div style="color:${col}">${m === d.mode ? '&#9654;' : '&nbsp;&nbsp;'} ${label.padEnd(8, ' ').replace(/ /g, '&nbsp;')} error ${(er[m] || 0).toFixed(2)} m &nbsp; hits ${rate(m)}</div>`;
   el.innerHTML = `<div style="font-size:18px;letter-spacing:3px;color:#ff6655">AI VIEW &middot; ${name}</div>`
     + `<div>target <b>${d.targetName || '--'}</b> &middot; aim mode <b>${String(d.mode).toUpperCase()}</b> &middot; predicting ${d.horizon}s ahead &middot; ${d.los ? '<span style="color:#7f7">line of sight</span>' : '<span style="color:#f88">no line of sight</span>'}</div>`
+    + stateLine
     + `<div style="color:#9ab">${d.warm ? 'model trained' : 'model warming up'} &middot; ${d.updates || 0} updates &middot; learned is using its ${({ model: 'movement forecast', rhythm: 'strafe-rhythm forecast', lead: 'straight-line lead' })[d.choice] || 'straight-line lead'}</div><div style="height:6px"></div>`
     + line('naive', 'NAIVE', '#bbb') + line('lead', 'LEAD', '#f0c83c') + line('learned', 'LEARNED', '#50dc78')
     + `<div style="height:6px"></div><div style="color:#9ab;font-size:11px">ghosts = where each model expects ${d.targetName || 'the target'} in ${d.horizon}s &middot; red dot = last shot</div>`

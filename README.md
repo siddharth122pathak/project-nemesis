@@ -67,6 +67,22 @@ comparison.
 
 ![Forecast error over time](docs/images/learning_curve.png)
 
+### How the bot moves
+
+Bots run a small state machine (`ai/nemesis-tactics.js`) instead of standing still and shooting:
+
+| State | What the bot does |
+|---|---|
+| Patrol | Walks between spawn areas when it knows of no enemy. |
+| Engage | Strafes on an irregular rhythm, keeps its weapon's preferred range, and fires only after a 0.35 to 0.65 s reaction to a new sighting. |
+| Take cover / In cover | After a few seconds of fighting, or when hit, runs to a nearby spot the enemy cannot see and waits. |
+| Peek | Steps back out to a spot with a view of where the enemy was, already aimed there. |
+| Hunt / Search | When it loses sight, goes to where the learned model **predicts** the enemy went (not where they really are), then searches around it. |
+
+Bots also have a field of view of about 130 degrees: they do not notice enemies behind them unless
+they are very close or just shot them. The AI view shows the current state, and a marker for where
+the bot is heading (blue for cover and peek spots, orange for the predicted position it is hunting).
+
 ### More screenshots
 
 | Naive | Lead | Learned, after training |

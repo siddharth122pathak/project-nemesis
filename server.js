@@ -10,6 +10,7 @@ const NFS = require('./nfs-server.js');   // NFS racing game module (self-contai
 const FIGHT = require('./fight-server.js');   // FRAME TRAP fighter relay (public/tekken): rooms with game === 'tekken'
 const NEMESIS = require('./ai/nemesis-bot.js');   // Nemesis Engine: bots that predict where humans will be
 const DUMMY = require('./ai/nemesis-dummy.js');   // Nemesis demo: scripted target player for the AI view
+const TACTICS = require('./ai/nemesis-tactics.js');   // Nemesis bot movement: cover, peek, hunt
 
 const PORT = process.env.PORT || 8090;
 // Listener interface: this computer only by default. LAN parties opt in with HOST=0.0.0.0 (npm run start:lan);
@@ -786,6 +787,7 @@ wss.on('connection', (ws) => {
 // ---------- bot AI (runs inside the room tick) ----------
 const BOT_SPEED = 5.2;            // m/s, slightly slower than sprinting humans
 const BOT_SIGHT = 50;             // engagement range (m)
+const tacticsApi = { posBlocked, segmentBlocked, pickSpawn, predict: (room, id, sec) => NEMESIS.predictPosition(room, id, sec) };
 function tickBots(room, dt) {
   const alive = [...room.players.entries()].filter(([, q]) => q.inGame && !q.dead && !q.spectator);
   for (const [bid, bot] of room.players) {
@@ -802,6 +804,7 @@ function tickBots(room, dt) {
       if (room.mode === 'heroes' && !o.bot && !o.hero) continue;               // still picking a hero
       const d = Math.hypot(o.pos[0] - bot.pos[0], o.pos[2] - bot.pos[2]);
       if (d < tDist) {
+        if (!TACTICS.canNotice(bot, oid, o, d)) continue;   // outside the bot's field of view
         dbgNear++;
         if (segmentBlocked(room.map, bot.pos[0], bot.pos[1] + 1.6, bot.pos[2], o.pos[0], o.pos[1] + 1.4, o.pos[2])) { dbgBlocked++; continue; }
         target = [oid, o]; tDist = d;
@@ -811,15 +814,11 @@ function tickBots(room, dt) {
       console.log(`[bot ${bid}] pos=(${bot.pos[0].toFixed(1)},${bot.pos[2].toFixed(1)}) near=${dbgNear} blocked=${dbgBlocked} target=${target ? target[0] : 'none'}`);
     }
 
-    if (target) {
+    // Nemesis tactics: patrol, engage, take cover, peek, and hunt the predicted position
+    const move = TACTICS.update(room, bid, bot, target, dt, tacticsApi);
+    if (target && move.shoot) {
       const [tid, t] = target;
-      // face the target + strafe sideways while engaging
       const dx = t.pos[0] - bot.pos[0], dz = t.pos[2] - bot.pos[2];
-      bot.ry = Math.atan2(-dx, -dz);
-      const strafe = Math.sin(Date.now() / 700 + bid.charCodeAt(1)) > 0 ? 1 : -1;
-      const nx = bot.pos[0] + (-dz / tDist) * strafe * BOT_SPEED * 0.5 * dt;
-      const nz = bot.pos[2] + (dx / tDist) * strafe * BOT_SPEED * 0.5 * dt;
-      if (!posBlocked(room.map, nx, nz)) { bot.pos[0] = nx; bot.pos[2] = nz; }
       // shoot on cooldown with distance-scaled accuracy
       const now = Date.now();
       if (now >= (bot.aiNextShot || 0)) {
@@ -840,20 +839,6 @@ function tickBots(room, dt) {
           applyDamage(room, bid, tid, Math.round(base * fall * (head ? 1.7 : 1)), head, bot.w);
         }
       }
-    } else {
-      // --- wander: walk toward a waypoint, reroll when reached or blocked ---
-      if (!bot.aiWaypoint || Math.hypot(bot.aiWaypoint[0] - bot.pos[0], bot.aiWaypoint[1] - bot.pos[2]) < 1.5 || bot.aiStuck > 20) {
-        const s = pickSpawn(room, true);
-        bot.aiWaypoint = [s[0] + (Math.random() - 0.5) * 6, s[2] + (Math.random() - 0.5) * 6];
-        bot.aiStuck = 0;
-      }
-      const dx = bot.aiWaypoint[0] - bot.pos[0], dz = bot.aiWaypoint[1] - bot.pos[2];
-      const d = Math.hypot(dx, dz) || 1;
-      bot.ry = Math.atan2(-dx, -dz);
-      const nx = bot.pos[0] + (dx / d) * BOT_SPEED * dt;
-      const nz = bot.pos[2] + (dz / d) * BOT_SPEED * dt;
-      if (posBlocked(room.map, nx, nz)) bot.aiStuck = (bot.aiStuck || 0) + 1;
-      else { bot.pos[0] = nx; bot.pos[2] = nz; bot.aiStuck = 0; }
     }
   }
 }
@@ -866,7 +851,7 @@ setInterval(() => {
     if (!room.started || room.players.size === 0) continue;
     if (room.game === 'nfs') { NFS.tick(room, 1 / TICK_RATE, nfsApi); continue; }
     if (!room.matchOver) {
-      DUMMY.tickDummies(room, 1 / TICK_RATE, { posBlocked, segmentBlocked });
+      DUMMY.tickDummies(room, 1 / TICK_RATE, { posBlocked, segmentBlocked, steer: TACTICS.steer });
       NEMESIS.observe(room);
       tickBots(room, 1 / TICK_RATE);
       NEMESIS.tick(room, { broadcastRoom, applyDamage, segmentBlocked, weaponDamage: BOT_WEAPON_DMG });

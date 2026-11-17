@@ -46,7 +46,14 @@ function tickDummies(room, dt, api) {
     // keep the fight in view: if the bot cannot see us for 2 s, step back into its sight
     const los = !api.segmentBlocked(room.map, bot.pos[0], bot.pos[1] + 1.6, bot.pos[2], d.pos[0], d.pos[1] + 1.4, d.pos[2]);
     s.noLos = los && best < 25 ? 0 : s.noLos + dt;
-    if (s.noLos > 2 || !s.placed) { s.placed = placeNear(room, d, bot, api) || s.placed; s.noLos = 0; continue; }
+    // first spawn, or lost for a long time: drop back into the bot's view
+    if (s.noLos > 12 || !s.placed) { s.placed = placeNear(room, d, bot, api) || s.placed; s.noLos = 0; continue; }
+    // lost sight for a bit: walk back toward the bot like a player looking for the fight
+    if (s.noLos > 1.5) {
+      api.steer(room, d, [bot.pos[0], bot.pos[2]], SPEED * 0.8, dt, api, 6);
+      d.ry = Math.atan2(-(bot.pos[0] - d.pos[0]), -(bot.pos[2] - d.pos[2]));
+      continue;
+    }
 
     s.timer += dt;
     if (s.timer >= s.interval) {

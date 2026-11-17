@@ -73,3 +73,37 @@ test('learned mode is never worse than lead on any scripted player', () => {
     assert.ok(learned.hits / learned.shots >= lead.hits / lead.shots - 0.02, `${style}: learned ${learned.hits}/${learned.shots} vs lead ${lead.hits}/${lead.shots}`);
   }
 });
+
+test('bot tactics: takes cover from a visible enemy and hunts the predicted spot after losing it', () => {
+  const T = require('../ai/nemesis-tactics.js');
+  // open field with one wall segment the bot can hide behind
+  const wall = { x0: -4, x1: 4, z0: 3, z1: 4 };
+  const inWall = (x, z) => x > wall.x0 - 0.45 && x < wall.x1 + 0.45 && z > wall.z0 - 0.45 && z < wall.z1 + 0.45;
+  const seg = (ax, az, bx, bz) => { for (let i = 0; i <= 40; i++) { const t = i / 40; if (inWall(ax + (bx - ax) * t, az + (bz - az) * t)) return true; } return false; };
+  const api = {
+    posBlocked: (_m, x, z) => inWall(x, z) || Math.abs(x) > 30 || Math.abs(z) > 30,
+    segmentBlocked: (_m, ax, _ay, az, bx, _by, bz) => seg(ax, az, bx, bz),
+    pickSpawn: () => [0, 0, 0],
+    predict: () => [-6, 12],
+  };
+  const room = { map: 'test' };
+  const bot = { pos: [0, 0, 0], ry: 0, hp: 100, deaths: 0, w: 1 };
+  const enemy = { pos: [12, 0, 6] };
+  const seen = new Set();
+  const realNow = Date.now, realRandom = Math.random;
+  let clock = realNow(), seed = 12345;
+  Date.now = () => clock;
+  Math.random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };   // repeatable run
+  try {
+    for (let i = 0; i < 40 * 20; i++) {
+      clock += 50;
+      const visible = !seg(bot.pos[0], bot.pos[2], enemy.pos[0], enemy.pos[2]);
+      T.update(room, 'b1', bot, visible && i < 500 ? ['p1', enemy] : null, 0.05, api);
+      seen.add(bot.ai.state);
+    }
+  } finally {
+    Date.now = realNow;
+    Math.random = realRandom;
+  }
+  for (const s of ['engage', 'cover', 'hunt']) assert.ok(seen.has(s), `never entered ${s}: ${[...seen]}`);
+});
