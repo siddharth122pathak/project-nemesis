@@ -35,7 +35,8 @@ The tag makes GitHub Actions run the tests and attach `project-nemesis-v0.2.0.zi
 | Measurements, before vs. after | `docs/MILESTONE2.md` (and `docs/MILESTONE2.pdf`) |
 | Charts | `docs/images/m2/charts/` |
 | Screenshots, every map × every camera | `docs/images/m2/` |
-| Demo video | `docs/media/nemesis_m2_demo.mp4` |
+| Feature tour video (captions, 3:50) | `docs/media/nemesis_m2_showcase.mp4` (re-record: `node tools/record-showcase.js`) |
+| Short demo video | `docs/media/nemesis_m2_demo.mp4` |
 | Raw data | `eval_out/m2/runs.json` |
 
 ## Headline numbers (162 simulated matches)

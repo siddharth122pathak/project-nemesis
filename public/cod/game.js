@@ -3194,7 +3194,15 @@ function aiPovUpdate(dt) {
   } else if (mode === 'world') {
     // free camera: WASD move, Q/E down/up, Shift fast, hold the mouse button and drag to look
     const f = AIPOV.fly;
-    if (!f.pos) { f.pos = botPos.clone().add(new THREE.Vector3(0, 22, 18)); f.yaw = 0; f.pitch = -0.85; }
+    if (!f.pos) {
+      // start above and behind the bot, but under the ceiling on indoor maps
+      raycaster.set(head, new THREE.Vector3(0, 1, 0)); raycaster.far = 24;
+      const roof = raycaster.intersectObjects(obstacles.map((ob) => ob.mesh), false)[0];
+      const up = roof ? Math.max(0.6, roof.distance - 0.6) : 16;
+      const yaw = d.botRy || 0, back = roof ? 5 : 14;
+      f.pos = head.clone().add(new THREE.Vector3(Math.sin(yaw) * back, up, Math.cos(yaw) * back));
+      f.yaw = yaw; f.pitch = -Math.atan2(up + 1.2, back);
+    }
     const sp = (f.keys.ShiftLeft || f.keys.ShiftRight ? 40 : 14) * dt;
     const fw = new THREE.Vector3(-Math.sin(f.yaw), 0, -Math.cos(f.yaw)), rt = new THREE.Vector3(Math.cos(f.yaw), 0, -Math.sin(f.yaw));
     if (f.keys.KeyW) f.pos.addScaledVector(fw, sp);
@@ -3299,6 +3307,7 @@ function aiPovHud(d, bot) {
     + `<div>weapon <b>${WN[f.w] || '--'}</b> ${chips}${d.plan ? ` &middot; plan <b>${d.plan.toUpperCase()}</b>` : ''}${d.score ? ` &middot; life ${d.score.lives} (${d.lifeSecs || 0}s) &middot; K ${d.score.kills} / D ${d.score.deaths}` : ''}</div>`;
   const keys = `<div style="color:#9ab;font-size:11px;margin-top:6px">[V] camera &middot; [L] learned map &middot; [H] panel size${AIPOV.demo ? ' &middot; [M] next map &middot; [K] player skill &middot; [B] strafe style' : ''} &middot; [N] aim mode &middot; [Shift+N] forget player${AIPOV.camMode === 'world' ? '<br>world camera: WASD move, Q/E down/up, Shift fast, drag mouse to look' : ''}</div>`;
   if (!d.targetId) {
+    if (d.demo) { el.innerHTML = head + stateLine + `<div style="color:#fc8">player is respawning...</div>` + keys; return; }
     el.innerHTML = head + stateLine + `<div style="color:#fc8">no human player in this match yet.</div>`
       + `<div style="color:#9ab">play in another browser WINDOW side by side, or open <b>/cod/?demo=1</b>.</div>` + keys;
     return;

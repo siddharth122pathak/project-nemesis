@@ -33,7 +33,7 @@ Measured over 162 simulated matches (6 maps × 3 player skills × 3 bot versions
 
 ![Milestone 2 camera modes](docs/images/m2/killhouse_third.png)
 
-Demo video: [docs/media/nemesis_m2_demo.mp4](docs/media/nemesis_m2_demo.mp4).
+Feature tour with captions (3:50): [docs/media/nemesis_m2_showcase.mp4](docs/media/nemesis_m2_showcase.mp4). Short raw demo: [docs/media/nemesis_m2_demo.mp4](docs/media/nemesis_m2_demo.mp4).
 
 ## Milestone 1 (v0.1.0)
 
