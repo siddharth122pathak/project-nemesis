@@ -23,11 +23,14 @@ const { navFor } = require('../ai/nemesis-nav.js');
 
 const MAPS = ['shipment', 'killhouse', 'range', 'blackout', 'districts', 'monastery'];
 const SKILLS = ['beginner', 'average', 'expert'];
-const CONFIGS = [
+const ONLY = process.env.CONFIGS ? process.env.CONFIGS.split(',') : null;
+const ALL_CONFIGS = [
   { id: 'v0.1', version: 1, learn: false },
   { id: 'v0.2-nolearn', version: 2, learn: false },
   { id: 'v0.2', version: 2, learn: true },
+  { id: 'v0.2-noadapt', version: 2, learn: true, adapt: false },
 ];
+const CONFIGS = ALL_CONFIGS.filter((c) => !ONLY || ONLY.includes(c.id));
 const DT = 0.05;
 const WEAPON_DMG = { 1: 25, 2: 60, 3: 70, 4: 45 };
 const COOLDOWN = { 1: 380, 2: 1100, 3: 1900, 4: 700 };
@@ -37,7 +40,7 @@ function seeded(seed) { let s = seed >>> 0 || 1; return () => { s = (s * 1664525
 function runOne(map, skill, cfg, seed, minutes) {
   Math.random = seeded(seed * 1009 + MAPS.indexOf(map) * 97 + SKILLS.indexOf(skill) * 13);   // same dice for every config
   const room = { code: `SIM-${map}-${skill}-${cfg.id}`, map, mode: 'dm', started: true, matchOver: false,
-    players: new Map(), nemesisVersion: cfg.version, nemesisLearn: cfg.learn };
+    players: new Map(), nemesisVersion: cfg.version, nemesisLearn: cfg.learn, nemesisAdapt: cfg.adapt !== false };
   const respawns = [];
   const applyDamage = (r, killerId, targetId, dmg, head, weapon) => {
     const k = r.players.get(killerId), t = r.players.get(targetId);

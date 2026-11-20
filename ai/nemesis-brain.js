@@ -144,7 +144,7 @@ function learnerTick(room, dt, b) {
 
 function profileFor(room, tid) {
   const b = brainOf(room);
-  if (!b.learn || !tid || !b.models.has(tid)) return L.PROFILES.average;
+  if (!b.learn || room.nemesisAdapt === false || !tid || !b.models.has(tid)) return L.PROFILES.average;   // nemesisAdapt=false: learn, but never ease off
   return L.PROFILES[b.models.get(tid).level] || L.PROFILES.average;
 }
 
