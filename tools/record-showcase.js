@@ -45,6 +45,7 @@ const FF = process.env.FFMPEG || '/Volumes/workplace/HW/Capstone_Proposal/venv/l
     <div style="font-size:26px;margin-top:10px">Milestone 2 &middot; v0.2 bots</div>
     <div style="font-size:19px;margin-top:28px;color:#cbd5dc;line-height:1.6">Bots that find their way around every map,<br>sprint, slide, jump and swap weapons,<br>and learn how you play while the match is running.</div>
     <div style="font-size:15px;margin-top:30px;color:#8a99a5">Siddharth Pathak &middot; Full Sail CSMS Capstone</div>`, 6);
+  await page.evaluate(() => { window.__aipov.noKeys = true; });
   await card('');
   await wait(2);
 
@@ -63,7 +64,7 @@ const FF = process.env.FFMPEG || '/Volumes/workplace/HW/Capstone_Proposal/venv/l
 
   // 3. world camera, flying around
   await cam('world');
-  await caption('WORLD CAMERA', 'Free camera: fly anywhere with WASD, Q/E for down/up, drag the mouse to look. You can watch the bot and the player at the same time.');
+  await caption('WORLD CAMERA', 'A free world camera can fly anywhere on the map, so you can watch the bot and the player at the same time.');
   await wait(3);
   await page.keyboard.down('KeyW'); await wait(1.2); await page.keyboard.up('KeyW');
   await page.mouse.move(640, 360); await page.mouse.down();
@@ -80,22 +81,18 @@ const FF = process.env.FFMPEG || '/Volumes/workplace/HW/Capstone_Proposal/venv/l
   await wait(11);
   await caption('LEARNING', '<span style="color:#f45">Red tiles</span>: where the bot died. <span style="color:#f45">Red arrows</span>: where it was shot from. Next life it avoids those spots and pre-aims them.');
   await wait(11);
-  await key('KeyL');
-  await caption('LEARNING', 'Press L to hide or show the learned map.');
-  await wait(3);
-  await key('KeyL');
   await cam('third');
   await caption('LEARNING', 'After every kill or death the bot scores its fight plan and writes a lesson in the panel. Plans that work on this player get picked more often.');
   await wait(13);
 
   // 5. expertise
   await key('KeyK');   // average -> expert
-  await caption('SKILL LEVEL', 'Press K to make the scripted player an EXPERT. Every 5 seconds the bot re-rates the player\'s skill from how they move and fight.');
+  await caption('SKILL LEVEL', 'The player is now playing at EXPERT level. Every 5 seconds the bot re-rates the player\'s skill from how they move and fight.');
   await wait(14);
-  await caption('SKILL LEVEL', 'Watch the "player skill" line. Against an expert the bot reacts faster, aims tighter, and slides and jumps more.');
+  await caption('SKILL LEVEL', 'The "player skill" line in the panel shows its rating. Against an expert the bot reacts faster, aims tighter, and slides and jumps more.');
   await wait(16);
   await key('KeyK');   // expert -> beginner
-  await caption('SKILL LEVEL', 'Now a BEGINNER. Once the bot rates them, it eases off: slower reactions, wider aim, no slides or flanks.');
+  await caption('SKILL LEVEL', 'Now the player is a BEGINNER. Once the bot rates them, it eases off: slower reactions, wider aim, no slides or flanks.');
   await wait(18);
   await key('KeyK'); await key('KeyK');   // back to expert for the map tour
 
@@ -107,18 +104,15 @@ const FF = process.env.FFMPEG || '/Volumes/workplace/HW/Capstone_Proposal/venv/l
     await key('KeyM');
     await wait(1.5);
     await cam(views[i]);
-    await caption('ALL MAPS', `${maps[i]}: same bot, same learning. It plans routes around walls, up stairs, onto ledges and off drops. (press M for the next map)${notes[i]}`);
+    await caption('ALL MAPS', `${maps[i]}: same bot, same learning. It plans routes around walls, up stairs, onto ledges and off drops.${notes[i]}`);
     await wait(10);
   }
 
   // 7. panel sizes
   await cam('third');
-  await key('KeyH');
-  await caption('PANEL', 'Press H to shrink the panel...');
-  await wait(4);
-  await key('KeyH');
-  await caption('PANEL', '...or hide it for a clean view. Press V any time to switch cameras.');
-  await wait(5);
+  await key('KeyH'); await key('KeyH');
+  await caption('3RD PERSON', 'The same match without the panel: the bot moving, fighting and adapting on its own.');
+  await wait(9);
   await key('KeyH');
   await caption('', '');
 
@@ -134,8 +128,7 @@ const FF = process.env.FFMPEG || '/Volumes/workplace/HW/Capstone_Proposal/venv/l
       ${row('Sprint / slide / jump / weapon swap', 'never', 'all used')}
       ${row('K/D against expert players', '0.26', '0.45')}
       ${row('Player skill rated right after 60 s', 'n/a', '45 of 54 runs')}
-    </table>
-    <div style="font-size:15px;color:#8a99a5;margin-top:24px">Full report: docs/MILESTONE2.pdf &middot; run it: npm start, then /cod/?demo=1</div>`, 10);
+    </table>`, 10);
 
   const vpath = await page.video().path();
   await ctx.close(); await browser.close();
