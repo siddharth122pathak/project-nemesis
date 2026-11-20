@@ -57,13 +57,18 @@ function observe(room) {
   }
 }
 
-// Called when a bot's cooldown allows a shot at a human. Queues the shot to fire after the reaction delay.
-function planShot(room, botId, bot, targetId, target) {
+// Called when a bot's cooldown allows a shot at a human. Queues the shot to fire after the reaction
+// delay (opts.reaction, from the bot's expertise profile) and returns the aim point, or null.
+function planShot(room, botId, bot, targetId, target, opts = {}) {
   const s = state(room);
   const tr = tracker(room, targetId);
-  if (!tr.predictor.lastPos) return;
-  const aim = tr.aimPoint(s.mode, REACTION_S);
-  s.pending.push({ due: s.tick + Math.round(REACTION_S * TICK_RATE), botId, targetId, aim, aimY: target.pos[1] + 1.2, mode: s.mode });
+  if (!tr.predictor.lastPos) return null;
+  const reaction = opts.reaction || REACTION_S;
+  const aim = tr.aimPoint(s.mode, reaction);
+  s.pending.push({ due: s.tick + Math.round(reaction * TICK_RATE), botId, targetId, aim, aimY: target.pos[1] + 1.2, mode: s.mode,
+    noise: opts.aimNoise || 1 });
+  if (opts.onPlanned) opts.onPlanned(aim, reaction);
+  return aim;
 }
 
 // Fire queued shots whose reaction delay has passed and resolve hits against where the player really is.
@@ -74,9 +79,11 @@ function resolveShots(room, api) {
     if (shot.due > s.tick) { still.push(shot); continue; }
     const bot = room.players.get(shot.botId), t = room.players.get(shot.targetId);
     if (!bot || !t || bot.dead || t.dead) continue;
+    // v0.2: the bot must still be facing its aim point when the shot leaves (it may have turned away)
+    if (api.onShotFired && !api.onShotFired(room, shot.botId, bot, shot.aim)) continue;
     const origin = [bot.pos[0], bot.pos[1] + 1.6, bot.pos[2]];
     const range = Math.hypot(shot.aim[0] - origin[0], shot.aim[1] - origin[2]) || 1;
-    const sigma = AIM_NOISE_PER_M * range;
+    const sigma = AIM_NOISE_PER_M * range * (shot.noise || 1);
     const aim = [shot.aim[0] + gaussian() * sigma, shot.aim[1] + gaussian() * sigma];
     const aimY = shot.aimY + gaussian() * sigma * 0.5;
     const dx = aim[0] - origin[0], dy = aimY - origin[1], dz = aim[1] - origin[2];
@@ -91,7 +98,8 @@ function resolveShots(room, api) {
     const blocked = api.segmentBlocked(room.map, origin[0], origin[1], origin[2], t.pos[0], t.pos[1] + 1.4, t.pos[2]);
     if (miss < BODY_RADIUS && vertical < 1.0 && !blocked) {
       st.hits++;
-      if (NO_DAMAGE || t.dummy) continue;   // demo/recording: count the hit, keep the target alive
+      if (api.onShotHit) api.onShotHit(room, shot.botId);
+      if (NO_DAMAGE) continue;   // recording mode: count the hit, keep the target alive
       const head = Math.random() < 0.12;   // same headshot share as the original bots
       const base = api.weaponDamage[bot.w] || 25;
       const fall = Math.max(0.4, 1 - Math.max(0, range - 12) * 0.02);
@@ -131,10 +139,14 @@ function sendPov(room, api) {
     const d = Math.hypot(p.pos[0] - bot.pos[0], p.pos[2] - bot.pos[2]);
     if (d < best) { best = d; target = [id, p]; }
   }
-  const dummy = [...room.players.values()].find((p) => p.dummy);
+  // follow the bot's current fight target when it has one
+  if (bot.ai && bot.ai.eng && room.players.has(bot.ai.eng.tid) && s.trackers.has(bot.ai.eng.tid)) {
+    const p = room.players.get(bot.ai.eng.tid);
+    if (!p.dead && p.inGame) target = [bot.ai.eng.tid, p];
+  }
+  const dummy = [...room.players.values()].find((p) => p.sim);
   const msg = { t: 'nemesispov', botId, botPos: bot.pos, botDead: !!bot.dead, mode: s.mode, horizon: REACTION_S,
-    botState: bot.ai ? bot.ai.state : 'patrol', botGoal: bot.ai && bot.ai.goal ? bot.ai.goal : null,
-    demo: !!dummy, style: dummy ? dummy.dm.style : null };
+    map: room.map, demo: !!dummy, style: dummy ? dummy.sim.style : null, targetSkill: dummy ? dummy.sim.skill : null };
   if (target) {
     const [tid, t] = target;
     const tr = s.trackers.get(tid);
@@ -146,6 +158,7 @@ function sendPov(room, api) {
     });
   }
   if (s.lastShot && s.tick - s.lastShot.tick < 12) msg.lastShot = s.lastShot;
+  if (api.povExtras) Object.assign(msg, api.povExtras(room, botId, msg.targetId));
   const data = JSON.stringify(msg);
   for (const w of watchers) w.ws.send(data);
 }

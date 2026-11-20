@@ -9,8 +9,8 @@ const HERO = require('./heromode-server.js');
 const NFS = require('./nfs-server.js');   // NFS racing game module (self-contained)
 const FIGHT = require('./fight-server.js');   // FRAME TRAP fighter relay (public/tekken): rooms with game === 'tekken'
 const NEMESIS = require('./ai/nemesis-bot.js');   // Nemesis Engine: bots that predict where humans will be
-const DUMMY = require('./ai/nemesis-dummy.js');   // Nemesis demo: scripted target player for the AI view
-const TACTICS = require('./ai/nemesis-tactics.js');   // Nemesis bot movement: cover, peek, hunt
+const BRAIN = require('./ai/nemesis-brain.js');   // Nemesis bots: navigation, tactics, and learning each player during the match
+const SIM = require('./ai/nemesis-simplayer.js');  // Nemesis demo/test: scripted human players that fight back
 
 const PORT = process.env.PORT || 8090;
 // Listener interface: this computer only by default. LAN parties opt in with HOST=0.0.0.0 (npm run start:lan);
@@ -26,85 +26,7 @@ const ROOM_CAP = 10;
 
 const PLAYER_COLORS = [0xff4444, 0x44aaff, 0x44ff88, 0xffcc33, 0xcc66ff, 0xff8844, 0x33ffee, 0xff66aa, 0x99ff44, 0x8899ff];
 
-// per-map spawn points — must match the layouts in public/maps.js
-const MAP_SPAWNS = {
-  monastery: [
-    [-98, 6.05, 30], [-104, 6.05, 42], [-92, 6.05, 40], [-95, 6.05, 33], [-101, 6.05, 36],   // west spawn room
-    [98, 6.05, -30], [104, 6.05, -42], [92, 6.05, -40], [95, 6.05, -33], [101, 6.05, -36],   // east spawn room
-  ],
-  cathedral: [
-    [-20, 0, -6], [-20, 0, 6],            // narthex corners
-    [-10, 0, -6.5], [-10, 0, 6.5],        // side aisles west
-    [0, 0, -6.5], [0, 0, 6.5],            // side aisles mid
-    [8, 0, -12], [8, 0, 12],              // transept arms
-    [17, 0.6, -6], [17, 0.6, 6],          // chancel flanks (raised)
-    [-16, 0, 0], [2, 0, 0],               // center aisle
-    [17.5, 0, 12.5], [17.5, 0, -12.5],    // sacristy / crypt chapel
-    [25, 0, 10], [25, 0, -10],            // ambulatory
-    [-20, 3.4, -4],                       // choir loft
-  ],
-  districts: [
-    [-25, 0, -25], [25, 0, -25], [-25, 0, 25], [25, 0, 25],
-    [0, 0, -35], [0, 0, 35], [-35, 0, 0], [35, 0, 0],
-    [-55, 0, -40], [55, 0, 40], [-40, 0, 55], [40, 0, -55],
-    [-45, 5.1, 0], [45, 5.1, 0],
-    [0, 5.6, -45], [0, 5.6, 45],
-  ],
-  shipment: [
-    [-8, 0, -11], [11, 0, -11], [-8, 0, 11], [11, 0, 11],
-    [-9, 0, 0], [13, 0, 0],
-    [-4.5, 0, -13], [4.5, 0, 12.5],
-    [2, 2.7, -13.4], [-2, 2.7, 13.4],   // on the north/south fence-line singles
-    [-12.1, 2.7, 6.7],                   // on the west cluster's climbable single
-  ],
-  forge: [
-    [-33, 0, -4], [-33, 0, 4], [-30, 0, 0], [-28, 0, -8], [-28, 0, 8],
-    [33, 0, -4], [33, 0, 4], [30, 0, 0], [28, 0, -8], [28, 0, 8],
-  ],
-  village: [
-    [0, 0, 28], [-3, 0, 26], [3, 0, 26], [-6, 0, 30], [6, 0, 30],
-    [0, 0, -28], [-3, 0, -26], [3, 0, -26], [-6, 0, -30], [6, 0, -30],
-  ],
-  shrine: [
-    [-31, 0, -4], [-31, 0, 4], [-29, 0, 0], [-26, 0, -6], [-26, 0, 6],
-    [31, 0, -4], [31, 0, 4], [29, 0, 0], [26, 0, -6], [26, 0, 6],
-  ],
-  sanctum: [
-    [-30, 0, -4], [-30, 0, 4], [-28, 0, 0], [-25, 0, -8], [-25, 0, 8],
-    [30, 0, -4], [30, 0, 4], [28, 0, 0], [25, 0, -8], [25, 0, 8],
-  ],
-  blackout: [
-    [-24, 0, -5],
-    [-24, 0, 5],
-    [-6, 0, -5],
-    [-6, 0, 5],
-    [-22, 0, -12],
-    [20, 0, -5],
-    [20, 0, 5],
-    [26, 0, -12],
-    [14, 0, 15],
-    [26, 0, 15],
-  ],
-  killhouse: [
-    [-18, 0, -10], [18, 0, -10], [-18, 0, 10], [18, 0, 10],
-    [-13, 0, 0], [13, 0, 0],
-    [0, 3.8, 11.4], [0, 3.8, -11.4],   // catwalks
-    [0, 3.3, 0],                        // house second floor
-  ],
-  range: [
-    [-8, 0, -24], [-11, 0, -21], [-5, 0, -19],     // N spawn finger
-    [1, 0, 27], [-2, 0, 24], [4, 0, 25],           // S spawn finger
-    [-19, 1.6, -14], [-15, 1.6, -12],              // range plateau
-    [-18, 0, 11], [-12, 0, 20],                    // west lane
-    [16, 0, 18], [25, 0, 8],                       // office / east lane
-    [14, 0, -8],                                   // NE armory
-    [-3, 6.6, 3],                                  // watchtower deck
-    [20, 3.6, 13],                                 // office second floor
-    [14, 3.3, -5],                                 // rock hill top
-  ],
-};
-const MAP_IDS = Object.keys(MAP_SPAWNS);
-const DEFAULT_MAP = 'districts';
+const { MAP_SPAWNS, MAP_IDS, DEFAULT_MAP, MAP_AABBS, MAP_RAMPS, pickSpawn, groundHeightAtServer, segmentBlocked, posBlocked } = require('./world.js');   // map geometry, shared with the Nemesis bots
 
 // ---------- static file server ----------
 const MIME = {
@@ -141,74 +63,8 @@ function makeCode() {
   return code;
 }
 
-function pickSpawn(room, groundOnly = false) {
-  let pts = MAP_SPAWNS[room?.map] || MAP_SPAWNS[DEFAULT_MAP];
-  if (groundOnly) pts = pts.filter(p => p[1] === 0);   // bots can't climb — elevated spawns sink them into geometry
-  return pts[Math.floor(Math.random() * pts.length)].slice();
-}
 
 // ---------- bots ----------
-// collision AABBs per map (generated from the client maps via __dumpObstacles)
-const MAP_AABBS = (() => {
-  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'mapdata.json'), 'utf8')); }
-  catch { console.warn('[bots] mapdata.json missing — bots will see through walls'); return {}; }
-})();
-// Ramp data: inclined surfaces for height calculation
-const MAP_RAMPS = (() => {
-  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'rampdata.json'), 'utf8')); }
-  catch { return {}; }
-})();
-
-// Get ground height at position, including ramps
-function groundHeightAtServer(map, x, z) {
-  let h = 0;
-  const rampList = MAP_RAMPS[map];
-  if (rampList) {
-    for (const r of rampList) {
-      if (x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ) {
-        let t;
-        if (r.axis === 'z') {
-          t = Math.max(0, Math.min(1, (z - r.minZ) / (r.maxZ - r.minZ)));
-        } else {
-          t = Math.max(0, Math.min(1, (x - r.minX) / (r.maxX - r.minX)));
-        }
-        const rampY = r.y0 + t * (r.y1 - r.y0);
-        h = Math.max(h, rampY);
-      }
-    }
-  }
-  return h;
-}
-
-// segment vs AABB (slab method) — true if the segment a->b is blocked
-function segmentBlocked(map, ax, ay, az, bx, by, bz) {
-  const boxes = MAP_AABBS[map];
-  if (!boxes) return false;
-  const dx = bx - ax, dy = by - ay, dz = bz - az;
-  for (const [x0, y0, z0, x1, y1, z1] of boxes) {
-    let t0 = 0, t1 = 1, miss = false;
-    for (const [o, d, mn, mx] of [[ax, dx, x0, x1], [ay, dy, y0, y1], [az, dz, z0, z1]]) {
-      if (Math.abs(d) < 1e-9) { if (o < mn || o > mx) { miss = true; break; } continue; }
-      let a = (mn - o) / d, b = (mx - o) / d;
-      if (a > b) [a, b] = [b, a];
-      t0 = Math.max(t0, a); t1 = Math.min(t1, b);
-      if (t0 > t1) { miss = true; break; }
-    }
-    if (!miss && t1 > 0 && t0 < 1) return true;
-  }
-  return false;
-}
-
-// point (with player radius) inside any AABB at standing height?
-function posBlocked(map, x, z) {
-  const boxes = MAP_AABBS[map];
-  if (!boxes) return false;
-  for (const [x0, y0, z0, x1, y1, z1] of boxes) {
-    if (y0 > 1.6 || y1 < 0.3) continue;   // ignore boxes above the head / below the feet
-    if (x + 0.45 > x0 && x - 0.45 < x1 && z + 0.45 > z0 && z - 0.45 < z1) return true;
-  }
-  return false;
-}
 
 const BOT_NAMES = ['ATLAS', 'VIPER', 'GHOST', 'JUGGERNAUT', 'ROOK', 'HAVOC', 'NOMAD', 'CIPHER'];
 const BOT_WEAPON_DMG = { 1: 25, 2: 60, 3: 70, 4: 45 };       // per burst/shot vs body, pre-falloff
@@ -223,7 +79,7 @@ function addBot(room) {
   room.players.set(id, {
     ws: fakeWs, bot: true, name,
     color: PLAYER_COLORS[room.players.size % PLAYER_COLORS.length],
-    pos: pickSpawn(room, true), ry: 0, pitch: 0,
+    pos: pickSpawn(room, BRAIN.legacy(room)), ry: 0, pitch: 0,
     hp: MAX_HP, kills: 0, deaths: 0, dead: false, inGame: room.started, w: 1 + Math.floor(Math.random() * 4),
     aiWaypoint: null, aiNextShot: 0, aiStuck: 0,
   });
@@ -264,6 +120,8 @@ function applyDamage(room, killerId, targetId, dmg, head, weapon, weaponName) {
   }
   target.hp -= dmg;
   target.lastHurt = Date.now();
+  BRAIN.onDamage(room, killerId, targetId, dmg, target.hp <= 0);   // Nemesis: bots learn from every hit, kill, and death
+  SIM.onSimHurt(room, targetId, killerId);
   if (target.hp > 0) {
     broadcastRoom(room, { t: 'damage', target: targetId, hp: target.hp, from: killerId });
     return;
@@ -300,7 +158,7 @@ function applyDamage(room, killerId, targetId, dmg, head, weapon, weaponName) {
   }
   setTimeout(() => {
     if (!rooms.has(room.code) || !room.players.has(targetId) || !room.started || room.matchOver) return;
-    const spawn = pickSpawn(room, !!target.bot);
+    const spawn = pickSpawn(room, !!target.bot && BRAIN.legacy(room));
     target.hp = target.maxHp || MAX_HP; target.dead = false; target.pos = spawn;
     broadcastRoom(room, { t: 'respawn', id: targetId, pos: spawn, hp: target.hp });
   }, RESPAWN_MS);
@@ -360,7 +218,7 @@ function startMatch(room) {
   for (const [id, p] of room.players) {
     p.kills = 0; p.deaths = 0;
     p.hp = MAX_HP; p.dead = false;
-    p.pos = pickSpawn(room, !!p.bot);
+    p.pos = pickSpawn(room, !!p.bot && BRAIN.legacy(room));
     p.inGame = true;
     p.ladder = 0;
     if (room.mode === 'gungame') p.w = ladderWeapon(p);   // everyone starts at the bottom of the ladder
@@ -457,8 +315,10 @@ wss.on('connection', (ws) => {
         });
         ws.room = newRoom;
         if (demo) {
+          newRoom.demo = true;
           addBot(newRoom);
-          DUMMY.addDummy(newRoom, { pickSpawn, playerColor: PLAYER_COLORS[2], style: msg.style === 'random' ? 'random' : 'rhythm' });
+          SIM.addSimPlayer(newRoom, { pickSpawn, color: PLAYER_COLORS[2], style: msg.style === 'random' ? 'random' : 'rhythm',
+            skill: ['beginner', 'average', 'expert'].includes(msg.skill) ? msg.skill : 'average', seed: 1 + Math.floor(Math.random() * 1000) });
           startMatch(newRoom);
           console.log(`[room ${code}] Nemesis demo started on ${newRoom.map}`);
           break;
@@ -558,13 +418,31 @@ wss.on('connection', (ws) => {
       case 'nemesisstyle': {
         // host switches the demo target between a learnable rhythm and random reversals
         if (!room || room.hostId !== id) return;
-        const style = DUMMY.toggleStyle(room);
+        const style = SIM.setStyle(room);
         if (style) broadcastRoom(room, { t: 'nemesisstyle', style });
+        break;
+      }
+      case 'nemesisskill': {
+        // host cycles the demo target's skill: beginner -> average -> expert
+        if (!room || room.hostId !== id) return;
+        const skill = SIM.cycleSkill(room);
+        if (skill) broadcastRoom(room, { t: 'nemesisskill', skill });
+        break;
+      }
+      case 'nemesismap': {
+        // demo only: move the whole match to the next map (bots keep what they learned about the player)
+        if (!room || room.hostId !== id || !room.demo) return;
+        const order = ['shipment', 'killhouse', 'range', 'blackout', 'districts', 'monastery'];
+        room.map = order[(order.indexOf(room.map) + 1) % order.length];
+        for (const [, q] of room.players) q.route = null;
+        startMatch(room);
+        console.log(`[room ${room.code}] Nemesis demo moved to ${room.map}`);
         break;
       }
       case 'nemesisreset': {
         if (!room || room.hostId !== id) return;
         NEMESIS.resetModels(room);
+        BRAIN.resetLearning(room);
         break;
       }
       case 'removebot': {
@@ -785,63 +663,10 @@ wss.on('connection', (ws) => {
 });
 
 // ---------- bot AI (runs inside the room tick) ----------
-const BOT_SPEED = 5.2;            // m/s, slightly slower than sprinting humans
-const BOT_SIGHT = 50;             // engagement range (m)
-const tacticsApi = { posBlocked, segmentBlocked, pickSpawn, predict: (room, id, sec) => NEMESIS.predictPosition(room, id, sec) };
-function tickBots(room, dt) {
-  const alive = [...room.players.entries()].filter(([, q]) => q.inGame && !q.dead && !q.spectator);
-  for (const [bid, bot] of room.players) {
-    if (!bot.bot || !bot.inGame || bot.dead) continue;
-    // fall toward the ground if spawned elevated (bots live at ground level)
-    if (bot.pos[1] > 0) bot.pos[1] = Math.max(0, bot.pos[1] - 9 * dt);
-
-    // --- target: nearest living opponent with line of sight ---
-    let target = null, tDist = BOT_SIGHT;
-    let dbgNear = 0, dbgBlocked = 0;
-    for (const [oid, o] of alive) {
-      if (oid === bid) continue;
-      if (room.mode === 'heroes' && o.team && o.team === bot.team) continue;   // no teammates
-      if (room.mode === 'heroes' && !o.bot && !o.hero) continue;               // still picking a hero
-      const d = Math.hypot(o.pos[0] - bot.pos[0], o.pos[2] - bot.pos[2]);
-      if (d < tDist) {
-        if (!TACTICS.canNotice(bot, oid, o, d)) continue;   // outside the bot's field of view
-        dbgNear++;
-        if (segmentBlocked(room.map, bot.pos[0], bot.pos[1] + 1.6, bot.pos[2], o.pos[0], o.pos[1] + 1.4, o.pos[2])) { dbgBlocked++; continue; }
-        target = [oid, o]; tDist = d;
-      }
-    }
-    if (process.env.BOT_DEBUG && Math.random() < 0.05) {
-      console.log(`[bot ${bid}] pos=(${bot.pos[0].toFixed(1)},${bot.pos[2].toFixed(1)}) near=${dbgNear} blocked=${dbgBlocked} target=${target ? target[0] : 'none'}`);
-    }
-
-    // Nemesis tactics: patrol, engage, take cover, peek, and hunt the predicted position
-    const move = TACTICS.update(room, bid, bot, target, dt, tacticsApi);
-    if (target && move.shoot) {
-      const [tid, t] = target;
-      const dx = t.pos[0] - bot.pos[0], dz = t.pos[2] - bot.pos[2];
-      // shoot on cooldown with distance-scaled accuracy
-      const now = Date.now();
-      if (now >= (bot.aiNextShot || 0)) {
-        bot.aiNextShot = now + (BOT_COOLDOWN[bot.w] || 500) * (0.9 + Math.random() * 0.4);
-        // Nemesis: against humans, aim at the predicted position instead of rolling for a hit
-        if (!t.bot) { NEMESIS.planShot(room, bid, bot, tid, t); continue; }
-        const origin = [bot.pos[0], bot.pos[1] + 1.6, bot.pos[2]];
-        const len = Math.hypot(dx, t.pos[1] + 1.2 - origin[1], dz) || 1;
-        const hitChance = Math.max(0.15, Math.min(0.8, 0.8 - tDist * 0.011));
-        const hit = Math.random() < hitChance;
-        const err = hit ? 0 : 0.12;   // misses visibly streak past
-        const dir = [dx / len + (Math.random() - 0.5) * err, (t.pos[1] + 1.2 - origin[1]) / len + (Math.random() - 0.5) * err, dz / len + (Math.random() - 0.5) * err];
-        broadcastRoom(room, { t: 'shot', from: bid, origin, dir, w: bot.w });
-        if (hit) {
-          const head = Math.random() < 0.12;
-          const base = BOT_WEAPON_DMG[bot.w] || 25;
-          const fall = Math.max(0.4, 1 - Math.max(0, tDist - 12) * 0.02);   // rough falloff
-          applyDamage(room, bid, tid, Math.round(base * fall * (head ? 1.7 : 1)), head, bot.w);
-        }
-      }
-    }
-  }
-}
+// All bot logic lives in ai/nemesis-brain.js; these are the server functions it may call.
+const brainApi = { posBlocked, segmentBlocked, pickSpawn, broadcastRoom, applyDamage: (...a) => applyDamage(...a),
+  weaponDamage: BOT_WEAPON_DMG, cooldowns: BOT_COOLDOWN };
+function tickBots(room, dt) { BRAIN.tickBots(room, dt, brainApi); }
 
 // position broadcast + out-of-combat regen, per room
 let regenTick = 0;
@@ -851,10 +676,11 @@ setInterval(() => {
     if (!room.started || room.players.size === 0) continue;
     if (room.game === 'nfs') { NFS.tick(room, 1 / TICK_RATE, nfsApi); continue; }
     if (!room.matchOver) {
-      DUMMY.tickDummies(room, 1 / TICK_RATE, { posBlocked, segmentBlocked, steer: TACTICS.steer });
+      SIM.tickSims(room, 1 / TICK_RATE, brainApi);
       NEMESIS.observe(room);
       tickBots(room, 1 / TICK_RATE);
-      NEMESIS.tick(room, { broadcastRoom, applyDamage, segmentBlocked, weaponDamage: BOT_WEAPON_DMG });
+      NEMESIS.tick(room, { broadcastRoom, applyDamage, segmentBlocked, weaponDamage: BOT_WEAPON_DMG,
+        onShotFired: BRAIN.onShotFired, onShotHit: BRAIN.onShotHit, povExtras: BRAIN.povExtras });
     }
     if (room.mode === 'heroes' && !room.matchOver && room.koth) {
       // temporary overhealth (BREAKER passive) decays back to the pool

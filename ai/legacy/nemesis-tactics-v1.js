@@ -1,3 +1,4 @@
+// v0.1 bot movement, kept unchanged as the baseline for the Milestone 2 measurements.
 'use strict';
 // Nemesis bot movement: a small state machine so the bot fights like a player instead of a turret.
 //

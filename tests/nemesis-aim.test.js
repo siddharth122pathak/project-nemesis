@@ -74,8 +74,8 @@ test('learned mode is never worse than lead on any scripted player', () => {
   }
 });
 
-test('bot tactics: takes cover from a visible enemy and hunts the predicted spot after losing it', () => {
-  const T = require('../ai/nemesis-tactics.js');
+test('v0.1 bot tactics (baseline): takes cover from a visible enemy and hunts the predicted spot after losing it', () => {
+  const T = require('../ai/legacy/nemesis-tactics-v1.js');
   // open field with one wall segment the bot can hide behind
   const wall = { x0: -4, x1: 4, z0: 3, z1: 4 };
   const inWall = (x, z) => x > wall.x0 - 0.45 && x < wall.x1 + 0.45 && z > wall.z0 - 0.45 && z < wall.z1 + 0.45;
