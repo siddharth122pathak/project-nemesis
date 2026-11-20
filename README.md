@@ -13,6 +13,28 @@ model expects the player to be 0.3 s from now (gray naive, yellow lead, green le
 is where the bot is aiming, and the red dot is its last shot. Full 2-minute clip:
 [docs/media/aiview_gameplay.mp4](docs/media/aiview_gameplay.mp4).*
 
+## Milestone 2 (v0.2.0)
+
+Bots now find their way around every map, sprint, slide, jump and swap weapons, and **learn the
+player during the match**: habits every second, fight plans every 1.5 s and on every kill or
+death, and the player's skill level (beginner / average / expert) every 5 s, which changes how hard
+they play. Full measurements against v0.1: **[docs/MILESTONE2.md](docs/MILESTONE2.md)**.
+
+Measured over 162 simulated matches (6 maps × 3 player skills × 3 bot versions × 3 seeds,
+10 min each):
+
+| | v0.1 | v0.2 |
+|---|---|---|
+| Time stuck while moving | 21.9% | 0.2% |
+| Shots fired while facing away | 186 | 0 |
+| Map reached | 27% | 52% |
+| K/D vs. expert players | 0.26 | 0.45 |
+| Player skill rated correctly after 60 s | n/a | 45/54 |
+
+![Milestone 2 camera modes](docs/images/m2/killhouse_third.png)
+
+Demo video: [docs/media/nemesis_m2_demo.mp4](docs/media/nemesis_m2_demo.mp4).
+
 ## Milestone 1 (v0.1.0)
 
 The original LAB ARENA bots rolled a dice for every shot. In this build, bots that shoot at a human
@@ -99,15 +121,25 @@ Requires Node.js 18 or later.
 npm install
 npm start            # http://localhost:8090/cod/  (this computer only)
 npm test             # unit tests + an end-to-end server test
-npm run eval         # headless bot evaluation, writes eval_out/
+npm run eval         # Milestone 1 aim evaluation, writes eval_out/
+npm run m2           # Milestone 2: v0.1 vs v0.2 matches + report (needs python3 + matplotlib)
 ```
 
 In the game: PLAY, DEPLOY, then **+ ADD AI** in the lobby and START GAME.
 
-**AI demo (one tab, no playing needed):** open `http://localhost:8090/cod/?demo=1`. It starts a
-match with one Nemesis bot and a scripted TARGET player and puts you in the AI view. Keys: **N**
-aim mode, **Shift+N** reset the learned model, **B** switch the target between a steady strafe
-rhythm and random jukes. Add `&map=shipment` for another map.
+**AI demo (one tab, no playing needed):** open
+`http://localhost:8090/cod/?demo=1&map=killhouse&skill=expert`. It starts a match with one Nemesis
+bot and a scripted player that fights back, and puts you in the AI view. `map` is any of shipment,
+killhouse, range, blackout, districts, monastery; `skill` is beginner, average or expert.
+
+| Key | Action |
+|---|---|
+| V | Camera: 3rd person → 1st person (bot's eyes) → world (free camera: WASD, Q/E, Shift, drag to look) |
+| M / K | Next map / next player skill (demo) |
+| L | Show what the bot learned (heat, danger, threat spots) |
+| H | AI panel: full → small → hidden |
+| N / Shift+N | Aim model / forget the player |
+| B | Player strafe style: steady rhythm or random |
 
 **AI view of your own match:** while a match is running, open a second tab at
 `http://localhost:8090/cod/?name=AIVIEW&code=<room code>&spectate=1`. The observer is invisible to
@@ -131,7 +163,15 @@ All original LAB ARENA controls still work (see the in-game menu).
 | Path | Contents |
 |---|---|
 | `ai/nemesis-aim.js` | The aim models: naive, lead, learned (online RLS), and the scoreboard. |
-| `ai/nemesis-bot.js` | Connects the models to the server's bot loop: reaction delay, aim spread, hit test, HUD stream. |
+| `ai/nemesis-bot.js` | Shot pipeline: reaction delay, aim spread, hit test, HUD and AI-view streams. |
+| `ai/nemesis-brain.js` | v0.2 bot brain: states, fight plans, abilities, facing fix, learning hooks, metrics. |
+| `ai/nemesis-learner.js` | Per-player model: habits, heat/danger maps, skill level, plan scores (Thompson sampling). |
+| `ai/nemesis-nav.js`, `ai/nemesis-move.js` | Walkable grid + A* for every map; route following, jumps, drops, gravity. |
+| `ai/nemesis-simplayer.js` | Scripted human players (beginner/average/expert) for the demo and the eval. |
+| `ai/legacy/` | The v0.1 tactics, unchanged, used as the "before" in measurements. |
+| `world.js` | Map geometry shared by the server and the bots (spawns, boxes, ramps, boundaries). |
+| `tools/arena-eval.js`, `tools/m2_report.py` | Milestone 2 measurements and report. |
+| `tools/camshots.js`, `tools/record-m2.js` | Camera-mode screenshots and the demo video. |
 | `server.js` | LAB ARENA game server. Nemesis hooks are marked `NEMESIS`. |
 | `public/cod/` | LAB ARENA browser client (three.js). Adds the Nemesis panel and keys. |
 | `tools/eval.js` | Headless evaluator with scripted test players. |

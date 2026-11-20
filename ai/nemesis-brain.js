@@ -50,7 +50,7 @@ function metricsOf(room, bid) {
   const b = brainOf(room);
   if (!b.metrics.has(bid)) {
     b.metrics.set(bid, {
-      kills: 0, deaths: 0, events: [], ttk: [], ttd: [], shots: 0, hits: 0, facingErr: 0, cancelled: 0,
+      kills: 0, deaths: 0, events: [], ttk: [], ttd: [], shots: 0, hits: 0, facingErr: 0, firedAway: 0, cancelled: 0,
       stuck: 0, moveSecs: 0, cells: new Set(), sprintSecs: 0, slides: 0, jumps: 0, switches: 0, aliveSecs: 0,
     });
   }
@@ -566,8 +566,9 @@ function onShotFired(room, bid, bot, aim) {
   const dx = aim[0] - bot.pos[0], dz = aim[1] - bot.pos[2], d = Math.hypot(dx, dz) || 1;
   const angle = (Math.acos(Math.max(-1, Math.min(1, (fx * dx + fz * dz) / d))) * 180) / Math.PI;
   if (angle > 30) mt.facingErr++;
-  if (b.version === 1) { mt.shots++; return true; }      // v0.1 fired regardless (the bug)
+  if (b.version === 1) { mt.shots++; if (angle > 30) mt.firedAway++; return true; }   // v0.1 fired regardless (the bug)
   if (angle > 35) { mt.cancelled++; return false; }       // v0.2: turned away during the reaction delay
+  if (angle > 30) mt.firedAway++;
   bot.ry = Math.atan2(-dx, -dz);
   mt.shots++;
   return true;
@@ -592,6 +593,7 @@ function povExtras(room, botId, targetId) {
     botGoal: bot.route && bot.route.goal ? [bot.route.goal[0], bot.route.goal[2]] : null,
     route: bot.route ? bot.route.pts.slice(bot.route.i, bot.route.i + 40).map((p) => [+p[0].toFixed(1), +p[1].toFixed(1), +p[2].toFixed(1)]) : [],
     plan: s.eng ? s.eng.plan.id : null,
+    lifeSecs: s.lifeStart ? Math.round((Date.now() - s.lifeStart) / 1000) : 0,
   };
   const mt = b.metrics.get(botId);
   if (mt) out.score = { kills: mt.kills, deaths: mt.deaths, lives: mt.deaths + 1 };
@@ -601,7 +603,8 @@ function povExtras(room, botId, targetId) {
     out.habits = m.summary();
     out.lessons = m.lessons.slice(0, 4).map((l) => l.text);
     if (s.eng) out.planTable = m.bandit.table(s.eng.ctx).sort((x, y) => y.value - x.value).slice(0, 4);
-    if (b.tick % 20 === 0) {
+    if (!b.learnedSentAt || Date.now() - b.learnedSentAt >= 1000) {
+      b.learnedSentAt = Date.now();
       out.learned = {
         heat: m.heatFor(room.map).top(80).map((c) => c.map((v) => +v.toFixed(2))),
         danger: m.dangerFor(room.map).top(30).map((c) => c.map((v) => +v.toFixed(2))),

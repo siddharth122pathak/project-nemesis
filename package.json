@@ -7,7 +7,9 @@
     "start": "node server.js",
     "start:lan": "HOST=0.0.0.0 node server.js",
     "test": "node --test tests/*.test.js",
-    "eval": "node tools/eval.js"
+    "eval": "node tools/eval.js",
+    "m2": "node tools/arena-eval.js 10 3 eval_out/m2 && python3 tools/m2_report.py",
+    "m2:report": "python3 tools/m2_report.py"
   },
   "keywords": [],
   "author": "Siddharth Pathak",

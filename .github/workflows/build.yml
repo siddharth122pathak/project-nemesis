@@ -25,9 +25,11 @@ jobs:
       - name: Package build
         run: |
           mkdir -p dist/project-nemesis
-          cp -R server.js heromode-server.js nfs-server.js fight-server.js mapdata.json rampdata.json \
+          cp -R server.js world.js heromode-server.js nfs-server.js fight-server.js mapdata.json rampdata.json \
                 package.json package-lock.json README.md THIRD_PARTY_ASSETS.md ai public tools dist/project-nemesis/
           cp eval_out/*.csv eval_out/summary.json dist/project-nemesis/
+          mkdir -p dist/project-nemesis/eval_out/m2 dist/project-nemesis/docs
+          cp eval_out/m2/runs.json dist/project-nemesis/eval_out/m2/ && cp docs/MILESTONE2.md dist/project-nemesis/docs/
           cd dist && zip -qr ../project-nemesis-${{ github.ref_name }}.zip project-nemesis
       - uses: actions/upload-artifact@v4
         with:

@@ -1,23 +1,27 @@
-# Milestone 1 Screencast Script (about 3 minutes)
+# Milestone 2 Screencast Script (about 4 minutes)
 
-Record with QuickTime (File > New Screen Recording) or OBS. Run `npm start`, open
-http://localhost:8090/cod/, create a Shipment or Firing Range match, add one AI, and start.
+Run `npm start` and open http://localhost:8090/cod/?demo=1&map=killhouse&skill=average.
+Record with QuickTime (File > New Screen Recording) or OBS. The Milestone 1 script is in
+`SCREENCAST_SCRIPT_M1.md`.
 
-1. **Intro (15 s).** "This is Nemesis Engine on top of LAB ARENA, my three.js shooter. Normal bots
-   roll a dice to decide if they hit you. Nemesis bots aim: they guess where I'll be 0.3 seconds
-   from now, about human reaction time, and the shot lands there."
-2. **Naive (30 s).** Press N until the panel shows Naive. Strafe. "Naive shoots where I was. If I
-   keep moving it basically never hits."
-3. **Lead (30 s).** Press N. Run steady, then start changing direction. "Lead assumes I keep going
-   straight. It gets me when I'm predictable and misses when I turn."
-4. **Learned (60 s).** Press N, then Shift+N to wipe the model. Strafe with a rhythm. "Learned
-   starts knowing nothing. Every tick it checks where I actually went and updates. Watch the
-   learned error in the panel drop below lead, and the hit rate climb."
-5. **Evidence (30 s).** Show `npm run eval` output and `docs/images/learning_curve.png`. "Against
-   scripted test players, learned aim hits a strafer 79% of the time versus 48% for lead. Against
-   random jukes it ties lead, and it is too strong against circling, which is what the fairness
-   governor is for."
-   Optional: play 20 s of `docs/media/aiview_gameplay.mp4` (or open the AI view tab live) to show
-   what the bot sees: the three prediction ghosts and where it is aiming.
-6. **Wrap-up (15 s).** Show `npm test` passing, the repo, and the v0.1.0 release. "Next: play-style
-   detection and the from-scratch PPO training pipeline."
+1. **Intro (20 s).** "Last milestone the bot learned to aim at where I'll be. This milestone it
+   learns how I play, during the match, and changes how it fights."
+2. **Camera modes (40 s).** Press V three times. "Third person over its shoulder. First person
+   through its eyes, so you see exactly what it sees. World camera, so you can fly around. The cyan
+   line is the route it planned with A*, on every map."
+3. **Abilities (30 s).** Stay in 3rd person during a fight. "It sprints, slides into fights, jumps,
+   and swaps weapons for the range: shotgun close, rifle mid, sniper long. Watch the chips in the
+   panel."
+4. **Learning (50 s).** Press L, then switch to the world camera. "Yellow tiles are where the player
+   usually goes. When it patrols, it goes there. Red tiles are where it died, and the red arrows
+   are where it was shot from. Next life it avoids those and pre-aims them. The lessons in the
+   panel say what it changed after each death."
+5. **Expertise (50 s).** Press K until the player is EXPERT. "Every 5 seconds it rates the player.
+   Watch the skill line change from average to expert. Against an expert it reacts faster and
+   slides more. Against a beginner it eases off." Press K again for beginner and show the change.
+6. **All maps (30 s).** Press M a few times. "Same bot, every map. It used to get stuck on corridor
+   maps like this one."
+7. **Measurements (40 s).** Open docs/MILESTONE2.pdf. "162 simulated matches. Time stuck went from
+   22% to 0.2%. Shots fired while looking away went from 186 to zero. K/D against expert players
+   went from 0.26 to 0.45. It rates the player's skill correctly within a minute in 45 of 54 runs."
+8. **Close (10 s).** "Next milestone: test against real players."
